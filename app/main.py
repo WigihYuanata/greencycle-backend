@@ -445,6 +445,7 @@ def get_dashboard_data(db: Session=Depends(get_db), current_user: User=Depends(g
     if active_pickup:
         status_jemput=f"Dijadwalkan hari {active_pickup.scheduled_day} (Status: {active_pickup.status})"
     return {
+        "ktm terhubung": current_user.rfid_uid is not None,
         "profil":{
         "npm": user.npm,
         "name": user.name,
