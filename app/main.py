@@ -9,7 +9,7 @@ from sqlalchemy import func, desc
 from app.core.config import settings
 from app.core.database import engine, Base, get_db
 from app.models import User, Transaction, reward, PickUpOrder, VoucherCatalog
-from app.schemas import UserCreate, UserResponse, TransactionCreate, TransactionResponse, RewardCreate, RewardResponse, CardRegistration, UserLogin, Token, ForgotPin, ResetPinExecute, PickUpOrderCreate, PickUpOrderResponse, VoucherCatalogCreate, VoucherCatalogResponse
+from app.schemas import UserCreate, UserResponse, TransactionCreate, TransactionResponse, RewardCreate, RewardResponse, CardRegistration, UserLogin, Token, ForgotPin, ResetPinExecute, PickUpOrderCreate, PickUpOrderResponse, VoucherCatalogCreate, VoucherCatalogResponse, TransactionHistory, RewardHistory, UserUpdate
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 import gspread
@@ -169,7 +169,16 @@ def create_user(user: UserCreate, bg_task: BackgroundTasks, db: Session=Depends(
     bg_task.add_task(push_to_sheet, ws_users, row_data)
     return new_user
 
-
+@app.put("/users/profile", response_model=UserResponse)
+def update_profile(data: UserUpdate, db: Session=Depends(get_db), current_user: User=Depends(get_current_user)):
+    if data.name:
+        current_user.name=data.name
+    if data.faculty:
+        current_user.faculty=data.faculty
+        db.commit()
+        db.refresh(current_user)
+        return current_user
+    
 @app.post("/auth/login/", response_model=Token)
 def login(data: UserLogin, db: Session=Depends(get_db)):
     user=db.query(User).filter(User.npm==data.npm).first()
@@ -408,7 +417,28 @@ def create_pickup_order(data:PickUpOrderCreate, db:Session=Depends(get_db), curr
 @app.get("/pickup/my-orders", response_model=List[PickUpOrderResponse])
 def get_my_pickup_orders(db:Session=Depends(get_db), current_user: User=Depends(get_current_user)):
     return db.query(PickUpOrder).filter(PickUpOrder.user_id==current_user.id).all()
+@app.delete("/pickup/cancel/{order_id}")
+def cancel_pickup_order(order_id: int, db: Session=Depends(get_db), current_user: User=Depends(get_current_user)):
+    order= db.query(PickUpOrder).filter(
+        PickUpOrder.id==order_id,
+        PickUpOrder.user_id==current_user.id
+    ).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Pesanan tidak ditemukan")
+    if order.status!="Pending":
+        raise HTTPException(status_code=400, detail="Hanya pesanan berstatus 'Pending' yang dapat dibatalkan")
+    order.status="Dibatalkan"
+    db.commit()
+    return{"message": f"Pesanan penjemputan ID {order_id} berhasil dibatalkan"}
 
+@app.put("/admin/pickup/{order_id}")
+def update_pickup_status(order_id: int, status: str, db: Session=Depends(get_db),kunci:str=Depends(machine_validate)):
+    order=db.query(PickUpOrder).filter(PickUpOrder.id==order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Pesanan tidak ditemukan")
+    order.status=status
+    db.commit()
+    return{"message": f"Status pesanan ID {order_id} berhasil diubah menjadi {status}"}
 
 @app.get("/dashboard/")
 def get_dashboard_data(db: Session=Depends(get_db), current_user: User=Depends(get_current_user)):
@@ -473,6 +503,14 @@ def get_dashboard_data(db: Session=Depends(get_db), current_user: User=Depends(g
         
     }
 
+@app.get("/transaction/history", response_model=List[TransactionHistory])
+def get_history_transaksi(db:Session=Depends(get_db), current_user:User=Depends(get_current_user)):
+    return db.query(Transaction).filter(Transaction.user_id==current_user.id).order_by(desc(Transaction.created_at)).all()
+
+
+@app.get("/redeem/history", response_model=List[RewardHistory])
+def get_kode_redeem(db:Session=Depends(get_db), current_user:User=Depends(get_current_user)):
+    return db.query(reward).filter(reward.user_id==current_user.id).order_by(desc(reward.created_at)).all()
 @app.get("/leaderboard/")
 def get_leaderboard(db: Session=Depends(get_db)):
     top_contributors=db.query(

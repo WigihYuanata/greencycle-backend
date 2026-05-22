@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 from enum import Enum
 from typing import Optional
@@ -8,12 +8,21 @@ class UserCreate(BaseModel):
     name: str
     faculty: str
     email: str
-    pin: str
+    pin: str=Field(min_length=6, max_length=6)
+    @field_validator('pin')
+    @classmethod
+    def pin_harus_angka(cls, v):
+        if not v.isdigit():
+            raise ValueError('PIN harus berupa angka 6 digit')
+        return v
+    
 
 class UserLogin(BaseModel):
     npm: str
     pin: str
-
+class UserUpdate(BaseModel):
+    name: Optional[str]=None
+    faculty:Optional[str]=None
 class Token(BaseModel):
     access_token: str
     token_type: str
@@ -24,7 +33,15 @@ class ForgotPin(BaseModel):
 class ResetPinExecute(BaseModel):
     npm: str
     kode_verifikasi: str
-    new_pin: str
+    new_pin: str= Field(min_length=6, max_length=6)
+    @field_validator('pin')
+    @classmethod
+    def pin_harus_angka(cls, v):
+        if not v.notdigit(): 
+            raise ValueError('PIN harus berupa angka 6 digit')
+        return v
+        
+
 
 class UserResponse(BaseModel):
     id: int
@@ -98,5 +115,25 @@ class VoucherCatalogResponse(BaseModel):
     cafe_name: str
     description: Optional[str]
     is_active: bool
+    class Config:
+        from_attributes=True
+class TransactionHistory(BaseModel):
+    id: int
+    bottle_small: int
+    bottle_medium: int
+    bottle_large: int
+    points: int
+    cretaed_at: datetime
+
+    class Config():
+        from_attributes=True
+
+class RewardHistory(BaseModel):
+    id: int
+    voucher_code: str
+    amount: int
+    status: str
+    created_at: datetime
+
     class Config:
         from_attributes=True
