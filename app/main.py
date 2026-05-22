@@ -20,6 +20,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from zoneinfo import ZoneInfo
 import uuid
+import secrets
 from typing import List
 
 SECRET_KEY = settings.SECRET_KEY
@@ -182,12 +183,11 @@ def forgot_pin(data: ForgotPin, bg_task: BackgroundTasks, db: Session=Depends(ge
     user=db.query(User).filter(User.npm==data.npm).first()
     if not user: raise HTTPException(status_code=404, detail="NPM tidak terdaftar")
     import random
-    reset_token=str(random.randint(100000, 999999))
+    reset_token=str(secrets.randbelow(900000)+ 100000)
     user.reset_token=reset_token
+    user.reset_token_expire= datetime.now(timezone.utc)+timedelta(minutes=15)
     db.commit()
     bg_task.add_task(send_reset_email, user.email,reset_token)
-
-    print(f"DEBUG: Token reset untuk {user.email} adalah {reset_token}")
     return {"message": f"Token reset telah dikirim ke email {user.email}"}
 
 @app.post("/auth/reset-pin")
@@ -195,8 +195,11 @@ def reset(data: ResetPinExecute, db: Session=Depends(get_db)):
     user= db.query(User).filter(User.npm==data.npm).first()
     if not user or user.reset_token !=data.kode_verifikasi:
         raise HTTPException(status_code=400, detail="Token reset tidak valid atau kadaluwarsa")
+    if user.reset_token_expire is None or datetime.now(timezone.utc)>user.reset_token_expire:
+        raise HTTPException(status_code=400, detail="Kode Verifikasi telah kadaluwarsa")
     user.hashed_pin=get_pin(data.new_pin)
     user.reset_token=None
+    user.reset_token_expire=None
     db.commit()
     return {"message": "PIN berhasil diperbarui. Silahkan login kembali"}
 

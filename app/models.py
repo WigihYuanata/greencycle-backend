@@ -13,7 +13,7 @@ class User(Base):
 
     hashed_pin= Column(String, index=True, nullable=False)
     reset_token= Column(String, index=True, nullable= True)
-
+    reset_token_expire=Column(DateTime, nullable=True)
 
     transactions= relationship("Transaction", back_populates="user")
     reward=relationship("reward", back_populates="user")
