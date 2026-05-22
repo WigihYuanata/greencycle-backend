@@ -96,7 +96,7 @@ app= FastAPI(title=settings.PROJECT_NAME)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.ORIGINS_DIIZINKAN.split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"]
@@ -182,7 +182,6 @@ def login(data: UserLogin, db: Session=Depends(get_db)):
 def forgot_pin(data: ForgotPin, bg_task: BackgroundTasks, db: Session=Depends(get_db)):
     user=db.query(User).filter(User.npm==data.npm).first()
     if not user: raise HTTPException(status_code=404, detail="NPM tidak terdaftar")
-    import random
     reset_token=str(secrets.randbelow(900000)+ 100000)
     user.reset_token=reset_token
     user.reset_token_expire= datetime.now(timezone.utc)+timedelta(minutes=15)
@@ -317,7 +316,7 @@ def redeem_reward(data: RewardCreate, bg_task: BackgroundTasks, db: Session=Depe
     waktu_sekarang=datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M:%S")
     row_data=[new_voucher.id, waktu_sekarang, user.npm, user.name, voucher_type.point_cost, unique_code, "Selasar Caffe", "Active"]
     bg_task.add_task(push_to_sheet, ws_reward, row_data)
-    tautan_kasir =f"http://127.0.0.1:8000/kasir?kode={unique_code}" 
+    tautan_kasir =f"{settings.BASE_URL}/kasir?kode={unique_code}" 
     return {
         "status": new_voucher.status,
         "voucher_code": unique_code,
@@ -380,7 +379,7 @@ def konsumsi_voucher(voucher_code: str, bg_tasks: BackgroundTasks, db:Session=De
 
     bg_tasks.add_task(update_status_sheet, vouch.id, "Terpakai")
 
-    return bg_tasks
+    return {"message": f"voucher {voucher_code} berhasil dipakai"}
 
 
 
