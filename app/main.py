@@ -338,13 +338,13 @@ def update_reward_status(reward_id: int, status: str, bg_tasks: BackgroundTasks,
 
     withdraw=db.query(reward).filter(reward.id==reward_id).first()
     if not withdraw:
-        raise HTTPException(status_code=404, detail= "Data penarikan tidak ditemukan di databse")
+        raise HTTPException(status_code=404, detail= "Data penarikan tidak ditemukan di database")
     withdraw.status=status
     db.commit()
     bg_tasks.add_task(update_status_sheet, reward_id, status)
 
     return {
-        "message": f"Eksekusi berhasil dilakukan. Status penarikan ID {reward_id} telah diubah menjadi {status} di database dan spreedsheet"
+        "message": f"Eksekusi berhasil dilakukan. Status penarikan ID {reward_id} telah diubah menjadi {status} di database dan spreadsheet"
     }
 
 def update_status_sheet(r_id, new_status):
@@ -362,7 +362,7 @@ def verifikasi_kasir(voucher_code: str, db: Session=Depends(get_db), kunci: str=
     vouch=db.query(reward).filter(reward.voucher_code==voucher_code).first()
     if not vouch:
        raise HTTPException(status_code=404, detail="KODE TIDAK VALID: Voucher tidak diketahui")
-    if vouch.status=="Terpakai":
+    if vouch.status=="Active":
         raise HTTPException(status_code=400, detail="Maaf voucher yang akan digunakan telah terpakai sebelumnya")
     katalog= db.query(VoucherCatalog).filter(VoucherCatalog.id==vouch.catalog_id).first()
 
