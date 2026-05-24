@@ -362,7 +362,7 @@ def verifikasi_kasir(voucher_code: str, db: Session=Depends(get_db), kunci: str=
     vouch=db.query(reward).filter(reward.voucher_code==voucher_code).first()
     if not vouch:
        raise HTTPException(status_code=404, detail="KODE TIDAK VALID: Voucher tidak diketahui")
-    if vouch.status=="Active":
+    if vouch.status!="Active":
         raise HTTPException(status_code=400, detail="Maaf voucher yang akan digunakan telah terpakai sebelumnya")
     katalog= db.query(VoucherCatalog).filter(VoucherCatalog.id==vouch.catalog_id).first()
 
