@@ -34,10 +34,10 @@ class ResetPinExecute(BaseModel):
     npm: str
     kode_verifikasi: str
     new_pin: str= Field(min_length=6, max_length=6)
-    @field_validator('pin')
+    @field_validator('new_pin')
     @classmethod
     def pin_harus_angka(cls, v):
-        if not v.notdigit(): 
+        if not v.isdigit(): 
             raise ValueError('PIN harus berupa angka 6 digit')
         return v
         
@@ -123,7 +123,7 @@ class TransactionHistory(BaseModel):
     bottle_medium: int
     bottle_large: int
     points: int
-    cretaed_at: datetime
+    created_at: datetime
 
     class Config():
         from_attributes=True

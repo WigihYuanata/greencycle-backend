@@ -175,9 +175,9 @@ def update_profile(data: UserUpdate, db: Session=Depends(get_db), current_user: 
         current_user.name=data.name
     if data.faculty:
         current_user.faculty=data.faculty
-        db.commit()
-        db.refresh(current_user)
-        return current_user
+    db.commit()
+    db.refresh(current_user)
+    return current_user
     
 @app.post("/auth/login/", response_model=Token)
 def login(data: UserLogin, db: Session=Depends(get_db)):

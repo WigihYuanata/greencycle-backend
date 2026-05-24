@@ -52,7 +52,7 @@ class VoucherCatalog(Base):
     name=Column(String, nullable=False)
     point_cost=Column(Integer, nullable=False)
     cafe_name=Column(String, nullable=False)
-    description=Column(String, nullable=False)
+    description=Column(String, nullable=True)
     is_active=Column(Boolean, default=True)
 
 
