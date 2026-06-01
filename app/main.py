@@ -5,7 +5,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc
+from sqlalchemy import func, desc, text
 from app.core.config import settings
 from app.core.database import engine, Base, get_db
 from app.models import User, Transaction, reward, PickUpOrder, VoucherCatalog
@@ -92,6 +92,9 @@ BASE_DIREKTORI=(os.path.dirname(os.path.abspath(__file__)))
 
 credential_path= os.path.join(BASE_DIREKTORI, 'credentials.json')
 Base.metadata.create_all(bind=engine)
+with engine.connect() as conn:
+    conn.execute(text(""" ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expire TIMESTAMP;"""))
+    conn.commit()
 app= FastAPI(title=settings.PROJECT_NAME)
 
 app.add_middleware(
@@ -115,7 +118,7 @@ def machine_validate(api_key: str= Security(api_key_header)):
     if api_key!=API_KEY_MESIN:
         raise HTTPException(status_code=404, detail="Akses ditolak: Kunci API tidak valid!")
     return api_key
-
+ws_users=ws_trans=ws_reward=None
 try:
     gc= gspread.service_account(filename=credential_path)
     sh= gc.open("GreenCycle")
@@ -127,6 +130,8 @@ except Exception as e:
     print(f"ERROR: Koneksi API Google Sheet Gagal - {e}")
 
 def push_to_sheet(sheet, row_data):
+    if sheet is None:
+        return
     try:
         sheet.append_row(row_data, value_input_option="USER_ENTERED")
     except Exception as e:
@@ -162,7 +167,7 @@ def create_user(user: UserCreate, bg_task: BackgroundTasks, db: Session=Depends(
         '=SUMIF(Transaksi!$D:$D; INDIRECT("C"&ROW()); Transaksi!$G:$G)',
         '=SUMIF(Transaksi!$D:$D; INDIRECT("C"&ROW()); Transaksi!$H:$H)',
         '=SUMIF(Transaksi!$D:$D; INDIRECT("C"&ROW()); Transaksi!$I:$I)',
-        '=SUMIF(Transaksi!$D:$D; INDIRECT("C"&ROW()); Transaksi!$J:$J) - SUMIFS(Reward!$F:$F; Reward!$D:$D; INDIRECT("C"&ROW()); Reward!$J:$J; "Success")',
+        '=SUMIF(Transaksi!$D:$D; INDIRECT("C"&ROW()); Transaksi!$J:$J) - SUMIFS(Reward!$F:$F; Reward!$D:$D; INDIRECT("C"&ROW()); Reward!$I:$I; "Terpakai")',
 
     ]
 
@@ -203,7 +208,7 @@ def reset(data: ResetPinExecute, db: Session=Depends(get_db)):
     user= db.query(User).filter(User.npm==data.npm).first()
     if not user or user.reset_token !=data.kode_verifikasi:
         raise HTTPException(status_code=400, detail="Token reset tidak valid atau kadaluwarsa")
-    if user.reset_token_expire is None or datetime.now(timezone.utc)>user.reset_token_expire:
+    if user.reset_token_expire is None or datetime.now(timezone.utc)>user.reset_token_expire.replace(tzinfo=timezone.utc):
         raise HTTPException(status_code=400, detail="Kode Verifikasi telah kadaluwarsa")
     user.hashed_pin=get_pin(data.new_pin)
     user.reset_token=None
@@ -241,7 +246,7 @@ def verify_rfid(rfid_uid: str, db : Session=Depends(get_db), kunci: str=Depends(
     }
 @app.post("/admin/vouchers", response_model=VoucherCatalogResponse)
 def add_voucher_to_catalog(data: VoucherCatalogCreate, db:Session=Depends(get_db), kunci: str=Depends(machine_validate)):
-    new_item= VoucherCatalog(**data.dict())
+    new_item= VoucherCatalog(**data.model_dump())
     db.add(new_item)
     db.commit()
     db.refresh(new_item)
@@ -352,7 +357,7 @@ def update_status_sheet(r_id, new_status):
         cell= ws_reward.find(str(r_id), in_column=2)
         if cell:
 
-            ws_reward.update_cell(cell.row, 10, new_status)
+            ws_reward.update_cell(cell.row, 9, new_status)
     except Exception as e:
         print(f"Peringatan: Gagal melakukan sinkronisasi update ke Google Sheets - {e}")
 
@@ -415,8 +420,8 @@ def create_pickup_order(data:PickUpOrderCreate, db:Session=Depends(get_db), curr
     return new_order
 
 @app.get("/pickup/my-orders", response_model=List[PickUpOrderResponse])
-def get_my_pickup_orders(db:Session=Depends(get_db), current_user: User=Depends(get_current_user)):
-    return db.query(PickUpOrder).filter(PickUpOrder.user_id==current_user.id).all()
+def get_my_pickup_orders(skip: int=0, limit: int=20, db:Session=Depends(get_db), current_user: User=Depends(get_current_user)):
+    return db.query(PickUpOrder).filter(PickUpOrder.user_id==current_user.id).offset(skip).limit(limit).all()
 @app.delete("/pickup/cancel/{order_id}")
 def cancel_pickup_order(order_id: int, db: Session=Depends(get_db), current_user: User=Depends(get_current_user)):
     order= db.query(PickUpOrder).filter(
@@ -504,13 +509,13 @@ def get_dashboard_data(db: Session=Depends(get_db), current_user: User=Depends(g
     }
 
 @app.get("/transaction/history", response_model=List[TransactionHistory])
-def get_history_transaksi(db:Session=Depends(get_db), current_user:User=Depends(get_current_user)):
-    return db.query(Transaction).filter(Transaction.user_id==current_user.id).order_by(desc(Transaction.created_at)).all()
+def get_history_transaksi(skip: int=0, limit: int=20, db:Session=Depends(get_db), current_user:User=Depends(get_current_user)):
+    return db.query(Transaction).filter(Transaction.user_id==current_user.id).order_by(desc(Transaction.created_at)).offset(skip).limit(limit).all()
 
 
 @app.get("/redeem/history", response_model=List[RewardHistory])
-def get_kode_redeem(db:Session=Depends(get_db), current_user:User=Depends(get_current_user)):
-    return db.query(reward).filter(reward.user_id==current_user.id).order_by(desc(reward.created_at)).all()
+def get_kode_redeem(skip: int=0, limit: int=20, db:Session=Depends(get_db), current_user:User=Depends(get_current_user)):
+    return db.query(reward).filter(reward.user_id==current_user.id).order_by(desc(reward.created_at)).offset(skip).limit(limit).all()
 @app.get("/leaderboard/")
 def get_leaderboard(db: Session=Depends(get_db)):
     top_contributors=db.query(
