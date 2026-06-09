@@ -54,6 +54,7 @@ class VoucherCatalog(Base):
     cafe_name=Column(String, nullable=False)
     description=Column(String, nullable=True)
     is_active=Column(Boolean, default=True)
+    milestone_threshold=Column(Integer, default=0, nullable=False)
 
 
 class PickUpOrder(Base):

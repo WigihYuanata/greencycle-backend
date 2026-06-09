@@ -107,6 +107,7 @@ class VoucherCatalogCreate(BaseModel):
     point_cost: int=Field(ge=1)
     cafe_name: str
     description: Optional[str]= None
+    milestone_threshold: int=Field(default=0, ge=0)
 
 class VoucherCatalogResponse(BaseModel):
     id: int
@@ -115,6 +116,7 @@ class VoucherCatalogResponse(BaseModel):
     cafe_name: str
     description: Optional[str]
     is_active: bool
+    milestone_threshold: int
     class Config:
         from_attributes=True
 class TransactionHistory(BaseModel):

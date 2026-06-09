@@ -37,19 +37,19 @@ def send_reset_email(target_email, token):
     msg=MIMEMultipart()
     msg['From']=EMAIL_SENDER
     msg['To']=target_email
-    msg['Subject']="[GreenCycle] Kode Verifikasi Reset PIN"
+    msg['Subject']="[GCM] Kode Verifikasi Reset PIN"
 
     body= f"""Yth Mahasiswa UPNVJT,
 
     
-    Kami menerima permintaan reset PIN untuk akun Greencycle anda.
+    Kami menerima permintaan reset PIN untuk akun GCM anda.
     Gunakan kode berikut untuk memverifikasi identitas anda:
     
     Kode: {token}
-    Kode ini bersifat rahasia. Jangan berikan kepada siapapun termasuk tim GreenCycle.
+    Kode ini bersifat rahasia. Jangan berikan kepada siapapun termasuk tim GCM.
 
     Salam,
-    GreenCycle Team - Teaching Industry UPNVJT
+    GreenCollectiveMovement Team - Teaching Industry UPNVJT
 
 """
     msg.attach(MIMEText(body, 'plain'))
@@ -94,6 +94,7 @@ credential_path= os.path.join(BASE_DIREKTORI, 'credentials.json')
 Base.metadata.create_all(bind=engine)
 with engine.connect() as conn:
     conn.execute(text(""" ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expire TIMESTAMP;"""))
+    conn.execute(text("""ALTER TABLE voucher_catalod ADD COLUMN IF NOT EXIXTS milestone_threshold INTEGER DEFAULT 0;"""))
     conn.commit()
 app= FastAPI(title=settings.PROJECT_NAME)
 
@@ -255,6 +256,26 @@ def add_voucher_to_catalog(data: VoucherCatalogCreate, db:Session=Depends(get_db
 @app.get("/vouchers/available", response_model=List[VoucherCatalogResponse])
 def get_available_voucher(db: Session=Depends(get_db)):
     return db.query(VoucherCatalog).filter(VoucherCatalog.is_active==True).all()
+@app.get("/vouchers/available-status")
+def get_voucher_status(db: Session=Depends(get_db), currrent_user: User=Depends(get_current_user)):
+    total_points=db.query(func.sum(Transaction.points)).filter(Transaction.user_id==currrent_user.id).scalar() or 0
+    vouchers=db.query(VoucherCatalog).filter(VoucherCatalog.is_active==True).all()
+    list_voucher_status=[]
+
+    for v in vouchers:
+        is_unlocked=total_points>=v.milestone_threshold
+        list_voucher_status.append({
+            "id": v.id,
+            "name": v.name,
+            "cafe_name": v.cafe_name,
+            "point_cost": v.point_cost,
+            "description": v.description,
+            "milestone_threshold": v.milestone_threshold,
+            "is_unlocked": is_unlocked,
+            "point_needed": max(0, v.milestone_threshold-total_points)
+
+        })
+    return list_voucher_status
 
 @app.post("/transactions/", response_model=TransactionResponse)
 @limiter.limit("60/minute")
@@ -311,6 +332,8 @@ def redeem_reward(data: RewardCreate, bg_task: BackgroundTasks, db: Session=Depe
     total_points= db.query(func.sum(Transaction.points)).filter(Transaction.user_id == user.id).scalar() or 0
     total_redeem= db.query(func.sum(reward.amount)).filter(reward.user_id == user.id).scalar() or 0
     current_points=total_points-total_redeem
+    if current_points < voucher_type.milestone_threshold:
+        raise HTTPException(status_code=400, detail= f"Voucher ini masih terkunci! Kumpulkan lebih banyak botol untuk membukanya")
     if current_points < voucher_type.point_cost:
         raise HTTPException(status_code=400, detail=f"Poin tidak cukup untuk penarikan, harga voucher {voucher_type.point_cost}. Kumpulkan lebih banyak botol untuk mendapatkan poin.")
    
