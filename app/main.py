@@ -94,7 +94,7 @@ credential_path= os.path.join(BASE_DIREKTORI, 'credentials.json')
 Base.metadata.create_all(bind=engine)
 with engine.connect() as conn:
     conn.execute(text(""" ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expire TIMESTAMP;"""))
-    conn.execute(text("""ALTER TABLE voucher_catalod ADD COLUMN IF NOT EXIXTS milestone_threshold INTEGER DEFAULT 0;"""))
+    conn.execute(text("""ALTER TABLE voucher_catalog ADD COLUMN IF NOT EXIXTS milestone_threshold INTEGER DEFAULT 0;"""))
     conn.commit()
 app= FastAPI(title=settings.PROJECT_NAME)
 
@@ -332,7 +332,7 @@ def redeem_reward(data: RewardCreate, bg_task: BackgroundTasks, db: Session=Depe
     total_points= db.query(func.sum(Transaction.points)).filter(Transaction.user_id == user.id).scalar() or 0
     total_redeem= db.query(func.sum(reward.amount)).filter(reward.user_id == user.id).scalar() or 0
     current_points=total_points-total_redeem
-    if current_points < voucher_type.milestone_threshold:
+    if total_points < voucher_type.milestone_threshold:
         raise HTTPException(status_code=400, detail= f"Voucher ini masih terkunci! Kumpulkan lebih banyak botol untuk membukanya")
     if current_points < voucher_type.point_cost:
         raise HTTPException(status_code=400, detail=f"Poin tidak cukup untuk penarikan, harga voucher {voucher_type.point_cost}. Kumpulkan lebih banyak botol untuk mendapatkan poin.")
