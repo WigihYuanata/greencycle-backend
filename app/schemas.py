@@ -8,12 +8,19 @@ class UserCreate(BaseModel):
     name: str
     faculty: str
     email: str
+    phone_number: str=Field(min_length=9, max_length=15)
     pin: str=Field(min_length=6, max_length=6)
     @field_validator('pin')
     @classmethod
     def pin_harus_angka(cls, v):
         if not v.isdigit():
             raise ValueError('PIN harus berupa angka 6 digit')
+        return v
+    @field_validator('phone_number')
+    @classmethod
+    def phone_number_harus_angka(cls, v):
+        if not v.replace('+', '').replace('-', '').isdigit():
+            raise ValueError('Nomor telepon tidak valid.')
         return v
     
 
@@ -48,6 +55,7 @@ class UserResponse(BaseModel):
     npm: str
     name: str
     email: str
+    phone_number: str
 
 
     class Config:
@@ -83,24 +91,11 @@ class RewardResponse(BaseModel):
     class Config:
         from_attributes=True
 
-class CardRegistration(BaseModel):
-    npm: str
-    rfid_uid: str
-class DayEnum(str, Enum):
-    sabtu="Sabtu"
-    minggu="Minggu"
-class PickUpOrderCreate(BaseModel):
-    pickup_address: str
-    contact_number:str
-    scheduled_day: DayEnum
+class MachineStatusUpdate(BaseModel):
+    machine_id: str
+    capacity_current: int=Field(ge=0)
+    capacity_max: int=Field(ge=1)
 
-class PickUpOrderResponse(BaseModel):
-    id:int
-    scheduled_day: str
-    status: str
-    created_at: datetime
-    class Config:
-        from_attributes=True
 
 class VoucherCatalogCreate(BaseModel):
     name: str
@@ -139,3 +134,6 @@ class RewardHistory(BaseModel):
 
     class Config:
         from_attributes=True
+
+class QRVerifyRequest(BaseModel):
+    npm: str

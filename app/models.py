@@ -8,8 +8,8 @@ class User(Base):
     npm= Column(String(20), unique=True, index=True)
     name= Column(String(100), nullable=False)
     faculty=Column(String(100), nullable=False)
-    email=Column(String, unique=True, index=True, nullable=False)
-    rfid_uid=Column(String, unique=True, index=True, nullable=True)
+    email=Column(String(100), unique=True, index=True, nullable=False)
+    phone_number=Column(String(20), nullable=False, unique=True)
 
     hashed_pin= Column(String, index=True, nullable=False)
     reset_token= Column(String, index=True, nullable= True)
@@ -17,7 +17,6 @@ class User(Base):
 
     transactions= relationship("Transaction", back_populates="user")
     reward=relationship("reward", back_populates="user")
-    pickup_orders= relationship("PickUpOrder", back_populates="user")
 
 class Transaction(Base):
     __tablename__="transactions"
@@ -58,14 +57,11 @@ class VoucherCatalog(Base):
     is_active=Column(Boolean, default=True)
     milestone_threshold=Column(Integer, default=0, nullable=False)
 
-
-class PickUpOrder(Base):
-    __tablename__= "pickup_orders"
+class MachineStatus(Base):
+    __tablename__="machine_status"
     id=Column(Integer, primary_key=True, index=True)
-    user_id= Column(Integer, ForeignKey("users.id"))
-    pickup_address=Column(String, nullable=False)
-    contact_number=Column(String, nullable=False)
-    scheduled_day=Column(String, nullable=False)
-    status=Column(String, default="Pending")
-    created_at= Column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
-    user=relationship("User", back_populates="pickup_orders")
+    machine_id= Column(String(50), nullable=False, unique=True)
+    capacity_current=Column(Integer, default=0)
+    capacity_max=Column(Integer, nullable=False)
+    last_notification_time=Column(DateTime, nullable=True)
+    updated_at= Column(DateTime, server_default=text('CURRENT_TIMESTAMP'), onupdate=text('CURRENT_TIMESTAMP'))
