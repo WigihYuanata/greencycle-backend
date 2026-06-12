@@ -94,7 +94,8 @@ credential_path= os.path.join(BASE_DIREKTORI, 'credentials.json')
 Base.metadata.create_all(bind=engine)
 with engine.connect() as conn:
     conn.execute(text(""" ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expire TIMESTAMP;"""))
-    conn.execute(text("""ALTER TABLE voucher_catalog ADD COLUMN IF NOT EXIXTS milestone_threshold INTEGER DEFAULT 0;"""))
+    conn.execute(text("""ALTER TABLE voucher_catalog ADD COLUMN IF NOT EXISTS milestone_threshold INTEGER DEFAULT 0;"""))
+    conn.execute(text("""ALTER TABLE rewards ADD COLUMN IF NOT EXISTS secure_token VARCHAR(36) UNIQUE;"""))
     conn.commit()
 app= FastAPI(title=settings.PROJECT_NAME)
 
@@ -141,7 +142,7 @@ def push_to_sheet(sheet, row_data):
 
 @app.get("/")
 def home():
-    return {"message": "Welcome to GreenCycle",
+    return {"message": "Welcome to Green Collective Movement",
     "project": settings.PROJECT_NAME}     
     
 @app.post("/users/", response_model=UserResponse)
@@ -238,7 +239,7 @@ def register_card_direct(data: CardRegistration, db: Session=Depends(get_db), ku
 def verify_rfid(rfid_uid: str, db : Session=Depends(get_db), kunci: str=Depends(machine_validate)):
     user=db.query(User).filter(User.rfid_uid==rfid_uid).first()
     if not user:
-        raise HTTPException(status_code=404, detail=" Kartu anda belum terdaftar. Silahkan registrasi di website GreenCycle terlebih dahulu")
+        raise HTTPException(status_code=404, detail=" Kartu anda belum terdaftar. Silahkan registrasi di website Green Collective Movement terlebih dahulu")
     return {
         "status": "Akses diberikan",
         "npm": user.npm,
@@ -257,8 +258,8 @@ def add_voucher_to_catalog(data: VoucherCatalogCreate, db:Session=Depends(get_db
 def get_available_voucher(db: Session=Depends(get_db)):
     return db.query(VoucherCatalog).filter(VoucherCatalog.is_active==True).all()
 @app.get("/vouchers/available-status")
-def get_voucher_status(db: Session=Depends(get_db), currrent_user: User=Depends(get_current_user)):
-    total_points=db.query(func.sum(Transaction.points)).filter(Transaction.user_id==currrent_user.id).scalar() or 0
+def get_voucher_status(db: Session=Depends(get_db), current_user: User=Depends(get_current_user)):
+    total_points=db.query(func.sum(Transaction.points)).filter(Transaction.user_id==current_user.id).scalar() or 0
     vouchers=db.query(VoucherCatalog).filter(VoucherCatalog.is_active==True).all()
     list_voucher_status=[]
 
@@ -339,11 +340,13 @@ def redeem_reward(data: RewardCreate, bg_task: BackgroundTasks, db: Session=Depe
    
   
     unique_code=f"GC-{str(uuid.uuid4()).upper()[:8]}"
+    crypto_token=str(uuid.uuid4())
     new_voucher= reward(
         user_id=user.id,
         catalog_id= voucher_type.id,
         amount=voucher_type.point_cost,
         voucher_code=unique_code,
+        secure_token=crypto_token,
         status="Active"
     )
 
@@ -353,7 +356,7 @@ def redeem_reward(data: RewardCreate, bg_task: BackgroundTasks, db: Session=Depe
     waktu_sekarang=datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M:%S")
     row_data=[new_voucher.id, waktu_sekarang, user.npm, user.name, voucher_type.point_cost, unique_code, "Selasar Caffe", "Active"]
     bg_task.add_task(push_to_sheet, ws_reward, row_data)
-    tautan_kasir =f"{settings.BASE_URL}/kasir?kode={unique_code}" 
+    tautan_kasir =f"{settings.BASE_URL}/kasir?kode={crypto_token}" 
     return {
         "status": new_voucher.status,
         "voucher_code": unique_code,
@@ -558,4 +561,42 @@ def get_leaderboard(db: Session=Depends(get_db)):
             "total_point":contributor.total_points or 0
         })
 
-    return {"Top_10_GreenCycle": ranking}
+    return {"Top_10_GCM_Contributor": ranking}
+
+@app.get("/voucher/public-verify/P{secure_token}")
+def verify_voucher_qr(secure_token: str, db: Session=Depends(get_db)):
+    vouch=db.query(reward).filter(reward.secure_token==secure_token).first()
+    if not vouch:
+       raise HTTPException(status_code=404, detail="KODE TIDAK VALID: Voucher tidak ditemukan")
+    if vouch.status!="Active":
+        raise HTTPException(status_code=400, detail="Maaf voucher yang akan digunakan telah terpakai sebelumnya")
+    katalog= db.query(VoucherCatalog).filter(VoucherCatalog.id==vouch.catalog_id).first()
+
+    return {
+        "status": "success",
+        "pesan": "Voucher siap ditukarkan",
+        "data_voucher":{
+            "kode": vouch.voucher_code,
+            "nama_caffe": katalog.cafe_name if katalog else "Selasar Caffe",
+            "nama_voucher": katalog.name if katalog else "Reward Diskon",
+            "potongan_poin": vouch.amount,
+            "status_saat_ini": vouch.status
+        }
+
+    }
+@app.get("/voucher/public-consume/P{secure_token}")
+def consume_voucher_qr(secure_token: str, bg_tasks: BackgroundTasks, db:Session=Depends(get_db)):
+    vouch= db.query(reward).filter(reward.secure_token==secure_token).with_for_update().first()
+    if not vouch:
+        raise HTTPException(status_code=404, detail="Voucher tidak valid")
+    if vouch.status!="Active":
+        raise HTTPException(status_code=400, detail="Tidak dapat ditukar, Voucher sudah pernah digunakan")
+
+    
+    
+    vouch.status="Terpakai"
+    db.commit()
+
+    bg_tasks.add_task(update_status_sheet, vouch.id, "Terpakai")
+
+    return {"message": f"voucher {vouch.voucher_code} berhasil dipakai"}

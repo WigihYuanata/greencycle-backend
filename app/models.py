@@ -40,6 +40,8 @@ class reward(Base):
     amount= Column(Integer)
 
     voucher_code=Column(String, unique=True, index=True)
+    secure_token=Column(String(36), unique=True, index=True, nullable=True)
+    
     status=Column(String, default="Active")
     created_at= Column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
 
