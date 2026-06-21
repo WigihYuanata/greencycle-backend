@@ -137,3 +137,7 @@ class RewardHistory(BaseModel):
 
 class QRVerifyRequest(BaseModel):
     npm: str
+
+class OTPVerify(BaseModel):
+    npm: str
+    otp: str

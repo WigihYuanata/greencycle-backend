@@ -9,7 +9,7 @@ from sqlalchemy import func, desc, text
 from app.core.config import settings
 from app.core.database import engine, Base, get_db
 from app.models import User, Transaction, reward, VoucherCatalog, MachineStatus
-from app.schemas import UserCreate, UserResponse, TransactionCreate, TransactionResponse, RewardCreate, RewardResponse, UserLogin, Token, ForgotPin, ResetPinExecute, VoucherCatalogCreate, VoucherCatalogResponse, TransactionHistory, RewardHistory, UserUpdate, MachineStatusUpdate, QRVerifyRequest
+from app.schemas import UserCreate, UserResponse, TransactionCreate, TransactionResponse, RewardCreate, RewardResponse, UserLogin, Token, ForgotPin, ResetPinExecute, VoucherCatalogCreate, VoucherCatalogResponse, TransactionHistory, RewardHistory, UserUpdate, MachineStatusUpdate, QRVerifyRequest, OTPVerify
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 import gspread
@@ -37,6 +37,21 @@ CAPACITY_MAKS=0.80
 
 pwd_context=CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer_scheme= HTTPBearer()
+
+
+def send_registration_whatsapp(target_phone, otp_code):
+    message=(
+        f"*[GCM SYSTEM - Verifikasi Pendaftaran]*\n\n"
+        f"Selamat datang di Green Collective Movement!\n"
+        f"Kode OTP Anda untuk menyelesaikan pendaftaran akun:\n\n"
+        f"*{otp_code}*\n\n"
+        f"_Kode ini berlaku selama 15 menit. Jangan berikan kepada siapapun termasuk Tim GCM._"
+    )
+    try:
+        req.post(WHATSAPP_API_URL, headers={"Authorization":WHATSAPP_API_TOKEN}, json={"target": target_phone, "message": message}, timeout=10)
+        print(f"INFO: Pesan OTP Pendaftaran Berhasil Dikirim ke Nomor: {target_phone}")
+    except Exception as e:
+        print(f"ERROR: Gagal mengirim pesan OTP pendaftaran ke {target_phone} : {e} ")
 
 def send_reset_email(target_email, token):
     msg=MIMEMultipart()
@@ -102,6 +117,7 @@ with engine.connect() as conn:
     conn.execute(text("""ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number VARCHAR(20) UNIQUE;"""))
     conn.execute(text("""ALTER TABLE voucher_catalog ADD COLUMN IF NOT EXISTS milestone_threshold INTEGER DEFAULT 0;"""))
     conn.execute(text("""ALTER TABLE rewards ADD COLUMN IF NOT EXISTS secure_token VARCHAR(36) UNIQUE;"""))
+    conn.execute(text("""ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;"""))
     conn.commit()
 app= FastAPI(title=settings.PROJECT_NAME)
 
@@ -151,7 +167,7 @@ def home():
     return {"message": "Welcome to Green Collective Movement",
     "project": settings.PROJECT_NAME}     
     
-@app.post("/users/", response_model=UserResponse)
+@app.post("/users/")
 def create_user(user: UserCreate, bg_task: BackgroundTasks, db: Session=Depends(get_db)):
     user_terdaftar= db.query(User).filter(User.npm==user.npm).first()
     if user_terdaftar:
@@ -161,22 +177,45 @@ def create_user(user: UserCreate, bg_task: BackgroundTasks, db: Session=Depends(
     if db.query(User).filter(User.phone_number==user.phone_number).first():
         raise HTTPException(status_code=400, detail="Nomor telepon sudah digunakan akun lain")
     
-    new_user= User(npm=user.npm, name= user.name, faculty=user.faculty, email=user.email, phone_number=user.phone_number, hashed_pin=get_pin(user.pin))
+    otp_token=str(secrets.randbelow(900000)+100000)
+    waktu_expire=datetime.now(timezone.utc)+timedelta(minutes=15)
+
+    new_user= User(npm=user.npm, name= user.name, faculty=user.faculty, email=user.email, phone_number=user.phone_number, hashed_pin=get_pin(user.pin), reset_token=otp_token, reset_token_expire=waktu_expire, is_verified=False)
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+
+    if user.phone_number:
+        bg_task.add_task(send_registration_whatsapp, user.phone_number, otp_token)
+    return {"message": "Pendaftaran awal berhasil. Silahkan masukan kode OTP yang dikirim ke WhatsApp anda.", "npm": new_user.npm}
+
+@app.post("/users/verify-otp/")
+def verify_registration_otp(data: OTPVerify, bg_task: BackgroundTasks, db: Session=Depends(get_db)):
+    user=sb.query(User).filter(User.npm==data.npm).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User tidak ditemukan.")
+    if getattr(user, 'is_verified', False):
+        raise HTTPException(status_code=400, detail="Akun anda sudah terverifikasi sebelumnya")
+    if user.reset_token!= data.otp_code:
+        raise HTTPException(status_code=400, detail="Kode OTP tidak valid/salah")
+    if user.reset_token_expire is None or datetime.now(timezone.utc)> user.reset_token_expire.replace(tzinfo=timezone.utc):
+        raise HTTPException(status_code=400, detail= "Kode OTP sudah kedaluarsa, silahkan minta kode baru")
+    
+    user.is_verified=True
+    user.reset_token=None
+    user.reset_token_expire=None
+    db.commit()
     row_data= [
         "=ROW()-3",
-        new_user.npm,
-        new_user.name,
-        new_user.faculty,
-        new_user.email,
+        user.npm,
+        user.name,
+        user.faculty,
+        user.email,
         (datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M:%S")),
         '=SUMIF(Transaksi!$D:$D; INDIRECT("C"&ROW()); Transaksi!$G:$G)',
         '=SUMIF(Transaksi!$D:$D; INDIRECT("C"&ROW()); Transaksi!$H:$H)',
         '=SUMIF(Transaksi!$D:$D; INDIRECT("C"&ROW()); Transaksi!$I:$I)',
         '=SUMIF(Transaksi!$D:$D; INDIRECT("C"&ROW()); Transaksi!$J:$J) - SUMIFS(Reward!$F:$F; Reward!$D:$D; INDIRECT("C"&ROW()); Reward!$I:$I; "Terpakai")',
-
     ]
 
     bg_task.add_task(push_to_sheet, ws_users, row_data)
@@ -208,6 +247,8 @@ def login(data: UserLogin, db: Session=Depends(get_db)):
     user=db.query(User).filter(User.npm==data.npm).first()
     if not user or not verifikasi_pin(data.pin, user.hashed_pin):
         raise HTTPException(status_code=401, detail="NPM atau PIN salah, coba kembali")
+    if not getattr(user, 'is_verified', False):
+        raise HTTPException(status_code=403, detail="Akun belum diverifikasi. Silahkan masukan OTP pendaftaran anda")
     access_token=create_access_token(data={"sub": user.npm})
     return{"access_token": access_token, "token_type": "bearer"}
 
