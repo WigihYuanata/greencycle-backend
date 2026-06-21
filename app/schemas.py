@@ -141,3 +141,6 @@ class QRVerifyRequest(BaseModel):
 class OTPVerify(BaseModel):
     npm: str
     otp_code: str
+
+class ResendOTP(BaseModel):
+    npm:str

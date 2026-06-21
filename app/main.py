@@ -9,7 +9,7 @@ from sqlalchemy import func, desc, text
 from app.core.config import settings
 from app.core.database import engine, Base, get_db
 from app.models import User, Transaction, reward, VoucherCatalog, MachineStatus
-from app.schemas import UserCreate, UserResponse, TransactionCreate, TransactionResponse, RewardCreate, RewardResponse, UserLogin, Token, ForgotPin, ResetPinExecute, VoucherCatalogCreate, VoucherCatalogResponse, TransactionHistory, RewardHistory, UserUpdate, MachineStatusUpdate, QRVerifyRequest, OTPVerify
+from app.schemas import UserCreate, UserResponse, TransactionCreate, TransactionResponse, RewardCreate, RewardResponse, UserLogin, Token, ForgotPin, ResetPinExecute, VoucherCatalogCreate, VoucherCatalogResponse, TransactionHistory, RewardHistory, UserUpdate, MachineStatusUpdate, QRVerifyRequest, OTPVerify, ResendOTP
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 import gspread
@@ -29,15 +29,29 @@ ALGORITHM = settings.ALGORITHM
 ACCESS_TOKEN_EXPIRE_DAY =7
 EMAIL_SENDER=settings.EMAIL_SENDER
 EMAIL_PASSWORD=settings.EMAIL_PASSWORD
+
 WHATSAPP_API_URL=settings.WHATSAPP_API_URL
 WHATSAPP_API_TOKEN=settings.WHATSAPP_API_TOKEN
-ADMIN_PHONE_NUMBER=settings.ADMIN_PHONE_NUMBER
+
+TELEGRAM_BOT_TOKEN=settings.TELEGRAM_BOT_TOKEN
+TELEGRAM_CHAT_ID=settings.TELEGRAM_CHAT_ID
+TELEGRAM_API_URL=f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+
 CAPACITY_MAKS=0.80
 
+
+HARGA_BOTOL_KECIL=10
+HARGA_BOTOL_SEDANG=20
+HARGA_BOTOL_BESAR=30
 
 pwd_context=CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer_scheme= HTTPBearer()
 
+def notifikasi_admin_telegram(text: str):
+    try:
+        req.post(TELEGRAM_API_URL, json={"chat_id": TELEGRAM_CHAT_ID, "text": text}, timeout=10)
+    except Exception as e:
+        print(f"ERROR: Gagal mengirim notifikasi ke telegram - {e}")
 
 def send_registration_whatsapp(target_phone, otp_code):
     message=(
@@ -48,10 +62,21 @@ def send_registration_whatsapp(target_phone, otp_code):
         f"_Kode ini berlaku selama 15 menit. Jangan berikan kepada siapapun termasuk Tim GCM._"
     )
     try:
-        req.post(WHATSAPP_API_URL, headers={"Authorization":WHATSAPP_API_TOKEN}, json={"target": target_phone, "message": message}, timeout=10)
-        print(f"INFO: Pesan OTP Pendaftaran Berhasil Dikirim ke Nomor: {target_phone}")
+        resp= req.post(WHATSAPP_API_URL, headers={"Authorization":WHATSAPP_API_TOKEN}, json={"target": target_phone, "message": message}, timeout=10)
+        try:
+            resp_data=resp.json()
+        except ValueError:
+            resp_data={}
+        gagal_dari_gateway=resp.status_code != 200 or resp_data.get("status") is False
+
+        if gagal_dari_gateway:
+            print(f"ERROR: Gateway WA menolak/gagal mengirim OTP ke {target_phone} - status_code: {resp.status_code}, response: {resp_data}")
+            notifikasi_admin_telegram(f"[GCM - PERINGATAN] Gagal kirim OTP pendaftaran ke {target_phone}. \nResponse gateway WA: {resp_data}")
+        else:
+            print(f"INFO: Pesan pendaftaran berhasil dikirim ke Nomor: {target_phone}")
     except Exception as e:
         print(f"ERROR: Gagal mengirim pesan OTP pendaftaran ke {target_phone} : {e} ")
+        notifikasi_admin_telegram(f"[GCM - PERINGATAN] Exception saat mengirim OTP ke {target_phone}: {e}")
 
 def send_reset_email(target_email, token):
     msg=MIMEMultipart()
@@ -88,6 +113,20 @@ def send_reset_email(target_email, token):
 
 def get_pin(pin): return pwd_context.hash(pin)
 def verifikasi_pin(plain_pin, hashed_pin): return pwd_context.verify(plain_pin, hashed_pin)
+
+def generate_otp():
+    otp_token=str(secrets.randbelow(900000)+100000)
+    waktu_expire=datetime(timezone.utc)+timedelta(minutes=15)
+    return otp_token, waktu_expire
+
+def is_row_sampah(existing_user):
+    if existing_user is None:
+        return False
+    if existing_user.is_verified:
+        return False
+    if existing_user.reset_token_expire is None:
+        return False
+    return datetime.now(timezone.utc) > existing_user.reset_token_expire.replace(tzinfo=timezone.utc)
 
 def create_access_token(data: dict):
     to_encode= data.copy()
@@ -169,16 +208,29 @@ def home():
     
 @app.post("/users/")
 def create_user(user: UserCreate, bg_task: BackgroundTasks, db: Session=Depends(get_db)):
-    user_terdaftar= db.query(User).filter(User.npm==user.npm).first()
-    if user_terdaftar:
-        raise HTTPException(status_code=400, detail="NPM sudah terdaftar di sistem GCM")
-    if db.query(User).filter(User.email==user.email).first():
-        raise HTTPException(status_code=400, detail="Email sudah terdaftar di sistem GCM")
-    if db.query(User).filter(User.phone_number==user.phone_number).first():
-        raise HTTPException(status_code=400, detail="Nomor telepon sudah digunakan akun lain")
+    existing_npm=db.query(User).filter(User.npm==user.npm).first()
+    if existing_npm:
+        if is_row_sampah(existing_npm):
+            db.delete(existing_npm)
+            db.commit()
+        else:
+            raise HTTPException(status_code=400, detail="NPM sudah terdaftar di sistem GCM")
     
-    otp_token=str(secrets.randbelow(900000)+100000)
-    waktu_expire=datetime.now(timezone.utc)+timedelta(minutes=15)
+    existing_email=db.query(User).filter(User.email==user.email).first()
+    if existing_email:
+        if is_row_sampah(existing_email):
+            db.delete(existing_email)
+            db.commit()
+        else:
+            raise HTTPException(status_code=400, detail="Email sudah terdaftar di sistem GCM. Mohon gunakan email lain")
+    existing_phone=db.query(User).filter(User.phone_number==user.phone_number).first()
+    if existing_phone:
+        if is_row_sampah(existing_phone):
+            db.delete(existing_phone)
+            db.commit()
+        else:
+            raise HTTPException(status_code=400, detail="Nomor telepon sudah terdaftar ke sistem GCM. Mohon gunakan nomor telepon lain")
+    otp_token, waktu_expire=generate_otp()
 
     new_user= User(npm=user.npm, name= user.name, faculty=user.faculty, email=user.email, phone_number=user.phone_number, hashed_pin=get_pin(user.pin), reset_token=otp_token, reset_token_expire=waktu_expire, is_verified=False)
     db.add(new_user)
@@ -221,11 +273,30 @@ def verify_registration_otp(data: OTPVerify, bg_task: BackgroundTasks, db: Sessi
     bg_task.add_task(push_to_sheet, ws_users, row_data)
     return user
 
+@app.post("/users/resend-otp/")
+@limiter.limit("3/minute")
+def resend_otp(request: Request, data: ResendOTP, bg_task: BackgroundTasks, db: Session=Depends(get_db)):
+    user=db.query(User).filter(User.npm==data.npm).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="NPM tidak ditemukan. Silahkan melakukan registrasi ulang akun di web GCM terlebih dahulu")
+    if user.is_verified:
+        raise HTTPException(status_code=400, detail="Akun anda sudah terverifikasi sebelumnya, silahkan login")
+    
+    otp_token, waktu_expire=generate_otp()
+    user.reset_token=otp_token
+    user.reset_token_expire=waktu_expire
+    db.commit()
+
+    bg_task.add_task(send_registration_whatsapp, user.phone_number, otp_token)
+    return {"message": f"Kode OTP baru telah dikirim ke WhatsApp {user.phone_number}"}
+
 @app.get("/machine/verify/{npm}")
 def verify_qr_code(npm:str, db: Session=Depends(get_db), kunci:str=Depends(machine_validate)):
     user=db.query(User).filter(User.npm==npm).first()
     if not user:
         raise HTTPException(status_code=404, detail="NPM belum terdaftar. Silahkan registrasi terlebih dahulu melalui web GCM")
+    if not user.is_verified:
+        raise HTTPException(status_code=403, detail="Akun belum diverifikasi OTP. Selesaikan verifikasi WhatsApp di web GCM terlebih dahulu sebelum menggunakan Vending Machine")
     return {"status": "Akses diberikan", "npm": user.npm, "nama": user.name, "instruksi_mesin": "Buka pintu masuk botol"}
 
 @app.get("/users/my-qr")
@@ -316,9 +387,12 @@ def Record_Transaction(request: Request, data: TransactionCreate, background_tas
     user= db.query(User).filter(User.npm==data.npm).first()
     if not user:
         raise HTTPException(status_code=404, detail="User tidak ditemukan. NPM  atau akun anda belum terdaftar di sistem GCM")
-    bottle_small_point=data.bottle_small*10
-    bottle_medium_point=data.bottle_medium*20
-    bottle_large_point=data.bottle_large*30
+    if not user.is_verified:
+        raise HTTPException(status_code=403, detail="Akun belum diverifikasi. Selesaikan verifikasi nomor telepon sebelum melanjutkan transaksi")
+    
+    bottle_small_point=data.bottle_small*HARGA_BOTOL_KECIL
+    bottle_medium_point=data.bottle_medium*HARGA_BOTOL_SEDANG
+    bottle_large_point=data.bottle_large*HARGA_BOTOL_BESAR
     total_point= bottle_small_point + bottle_medium_point + bottle_large_point
     new_transaction=Transaction(
         user_id=user.id,
@@ -530,20 +604,23 @@ def consume_voucher_qr(secure_token: str, bg_tasks: BackgroundTasks, db:Session=
 
 def send_capacity_alert(machine_id, pct: float):
     message=(
-        f"[GCM ALERT] Kapasitas Mesin Hampir Penuh!*\n\n"
-        f"Mesin ID: *{machine_id}*\n"
-        f"Kapasitas saat ini: *{pct*100:.0f}%*\n\n"
+        f"[GCM ALERT] Kapasitas Mesin Hampir Penuh!\n\n"
+        f"Mesin ID: {machine_id}\n"
+        f"Kapasitas saat ini: {pct*100:.0f}%\n\n"
         f"Segera kosongkan mesin agar transaksi tidak terganggu.\n\n"
-        f"_GCM System - Auto Notification_")
+        f"GCM System - Auto Notification")
     try:
-        req.post(WHATSAPP_API_URL, headers={"Authorization":WHATSAPP_API_TOKEN}, json={
-            "target": ADMIN_PHONE_NUMBER,
-            "message": message
+        resp= req.post(TELEGRAM_API_URL, json={
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": message
         }, timeout=10 )
-        print(f"INFO: Pesan peringatan kapasitas tinggi berhasil dikirim ke WhatsApp")
+        if resp.status_code==200 and resp.json().get("ok"):
+            print(f"INFO: Pesan peringatan kapasitas hampir makasimal berhasil dikirim ke Telegram Group")
+        else:
+            print(f"ERROR: Telegram menolak pesan - status {resp.status_code}, response: {resp.text}")
     except Exception as e:
-        print(f"ERROR: Gagal mengirim pesan peringatan ke WhatsApp - {e}")
-    
+        print(f"ERROR: Gagal mengirim pesan peringatan ke telegram - {e}")
+
 @app.post("/iot/machine-status")
 def  update_machine_status(data: MachineStatusUpdate, bg_tasks: BackgroundTasks, db: Session=Depends(get_db), kunci: str=Depends(machine_validate)):
     mesin=db.query(MachineStatus).filter(MachineStatus.machine_id==data.machine_id).first()
@@ -565,4 +642,5 @@ def  update_machine_status(data: MachineStatusUpdate, bg_tasks: BackgroundTasks,
         bg_tasks.add_task(send_capacity_alert, mesin.machine_id, pct)
 
     notifikasi_kapasitas=pct >= CAPACITY_MAKS and not sudah_notifikasi_hari_ini
-    return {"machine_id": mesin.machine_id, "kapasitas": f"{pct*100:.1f}", "status":"Hampir penuh", "notifikasi": notifikasi_kapasitas}
+    status_kapasitas= "Hampir Penuh" if pct>= CAPACITY_MAKS else "Normal"
+    return {"machine_id": mesin.machine_id, "kapasitas": f"{pct*100:.1f}", "status":status_kapasitas, "notifikasi": notifikasi_kapasitas}
