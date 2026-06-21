@@ -140,4 +140,4 @@ class QRVerifyRequest(BaseModel):
 
 class OTPVerify(BaseModel):
     npm: str
-    otp: str
+    otp_code: str

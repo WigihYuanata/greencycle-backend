@@ -191,7 +191,7 @@ def create_user(user: UserCreate, bg_task: BackgroundTasks, db: Session=Depends(
 
 @app.post("/users/verify-otp/")
 def verify_registration_otp(data: OTPVerify, bg_task: BackgroundTasks, db: Session=Depends(get_db)):
-    user=sb.query(User).filter(User.npm==data.npm).first()
+    user=db.query(User).filter(User.npm==data.npm).first()
     if not user:
         raise HTTPException(status_code=404, detail="User tidak ditemukan.")
     if getattr(user, 'is_verified', False):
@@ -219,7 +219,8 @@ def verify_registration_otp(data: OTPVerify, bg_task: BackgroundTasks, db: Sessi
     ]
 
     bg_task.add_task(push_to_sheet, ws_users, row_data)
-    return new_user
+    return user
+
 @app.get("/machine/verify/{npm}")
 def verify_qr_code(npm:str, db: Session=Depends(get_db), kunci:str=Depends(machine_validate)):
     user=db.query(User).filter(User.npm==npm).first()
