@@ -116,7 +116,7 @@ def verifikasi_pin(plain_pin, hashed_pin): return pwd_context.verify(plain_pin, 
 
 def generate_otp():
     otp_token=str(secrets.randbelow(900000)+100000)
-    waktu_expire=datetime(timezone.utc)+timedelta(minutes=15)
+    waktu_expire=datetime.now(timezone.utc)+timedelta(minutes=15)
     return otp_token, waktu_expire
 
 def is_row_sampah(existing_user):
