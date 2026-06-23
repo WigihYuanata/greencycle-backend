@@ -44,6 +44,7 @@ class reward(Base):
     
     status=Column(String, default="Active")
     created_at= Column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+    expires_at=Column(DateTime, nullable=True)
 
     user= relationship("User", back_populates="reward")
     catalog=relationship("VoucherCatalog")
@@ -53,10 +54,11 @@ class VoucherCatalog(Base):
     id=Column(Integer, primary_key=True, index=True)
     name=Column(String, nullable=False)
     point_cost=Column(Integer, nullable=False)
-    cafe_name=Column(String, nullable=False)
+    cafe_name=Column(String, nullable=False, default="Selasar Caffe")
     description=Column(String, nullable=True)
     is_active=Column(Boolean, default=True)
     milestone_threshold=Column(Integer, default=0, nullable=False)
+    voucher_duration_days=Column(Integer, default=7, nullable=False)
 
 class MachineStatus(Base):
     __tablename__="machine_status"

@@ -157,6 +157,8 @@ with engine.connect() as conn:
     conn.execute(text("""ALTER TABLE voucher_catalog ADD COLUMN IF NOT EXISTS milestone_threshold INTEGER DEFAULT 0;"""))
     conn.execute(text("""ALTER TABLE rewards ADD COLUMN IF NOT EXISTS secure_token VARCHAR(36) UNIQUE;"""))
     conn.execute(text("""ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;"""))
+    conn.execute(text("""ALTER TABLE rewards ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP;"""))
+    conn.execute(text("""ALTER TABLE voucher_catalog ADD COLUMN IF NOT EXISTS voucher_duration_days INTEGER DEFAULT 7;"""))
     conn.commit()
 app= FastAPI(title=settings.PROJECT_NAME)
 
@@ -447,13 +449,15 @@ def redeem_reward(data: RewardCreate, bg_task: BackgroundTasks, db: Session=Depe
   
     unique_code=f"GC-{str(uuid.uuid4()).upper()[:8]}"
     crypto_token=str(uuid.uuid4())
+    waktu_expires=datetime.now(timezone.utc)+timedelta(days=voucher_type.voucher_duration_days)
     new_voucher= reward(
         user_id=user.id,
         catalog_id= voucher_type.id,
         amount=voucher_type.point_cost,
         voucher_code=unique_code,
         secure_token=crypto_token,
-        status="Active"
+        status="Active",
+        expires_at=waktu_expires
     )
 
     db.add(new_voucher)
@@ -468,7 +472,8 @@ def redeem_reward(data: RewardCreate, bg_task: BackgroundTasks, db: Session=Depe
         "voucher_code": unique_code,
         "qr_code_url": f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={tautan_kasir}",
         "cafe_name": f"{voucher_type.cafe_name} ({voucher_type.name})",
-        "sisa_point": current_points-voucher_type.point_cost
+        "sisa_point": current_points-voucher_type.point_cost,
+        "expires_at": waktu_expires
     }
 
 def update_status_sheet(r_id, new_status):
@@ -569,8 +574,15 @@ def verify_voucher_qr(secure_token: str, db: Session=Depends(get_db)):
     vouch=db.query(reward).filter(reward.secure_token==secure_token).first()
     if not vouch:
        raise HTTPException(status_code=404, detail="KODE TIDAK VALID: Voucher tidak ditemukan")
-    if vouch.status!="Active":
+    if vouch.status=="Terpakai":
         raise HTTPException(status_code=400, detail="Maaf voucher yang akan digunakan telah terpakai sebelumnya")
+    if vouch.status=="Kadaluarsa":
+        raise HTTPException(status_code=400, detail="Maaf voucher ini sudah kadaluarsa dan tidak dapat digunakan")
+    if vouch.expires_at is not None and datetime.now(timezone.utc)>vouch.expires_at.replace(tzinfo=timezone.utc):
+        vouch.status="Kadaluarsa"
+        db.commit()
+        raise HTTPException(status_code=400, detail="Maaf voucher ini sudah kadaluarsa dan tidak dapat digunakan")
+    
     katalog= db.query(VoucherCatalog).filter(VoucherCatalog.id==vouch.catalog_id).first()
 
     return {
@@ -581,7 +593,8 @@ def verify_voucher_qr(secure_token: str, db: Session=Depends(get_db)):
             "nama_caffe": katalog.cafe_name if katalog else "Selasar Caffe",
             "nama_voucher": katalog.name if katalog else "Reward Diskon",
             "potongan_poin": vouch.amount,
-            "status_saat_ini": vouch.status
+            "status_saat_ini": vouch.status,
+            "expires_at":vouch.expires_at
         }
 
     }
@@ -590,8 +603,14 @@ def consume_voucher_qr(secure_token: str, bg_tasks: BackgroundTasks, db:Session=
     vouch= db.query(reward).filter(reward.secure_token==secure_token).with_for_update().first()
     if not vouch:
         raise HTTPException(status_code=404, detail="Voucher tidak valid")
-    if vouch.status!="Active":
+    if vouch.status=="Terpakai":
         raise HTTPException(status_code=400, detail="Tidak dapat ditukar, Voucher sudah pernah digunakan")
+    if vouch.status=="Kadaluarsa":
+        raise HTTPException(status_code=400, detail="Tidak dapat menukar voucher, voucher sudah kadaluarsa")
+    if vouch.expires_at is not None and datetime.now(timezone.utc)>vouch.expires_at.replace(tzinfo=timezone.utc):
+        vouch.status="Kadaluarsa"
+        db.commit()
+        raise HTTPException(status_code=400, detail="Tidak dapat menukar voucher, voucher sudah kadaluarsa")
 
     
     

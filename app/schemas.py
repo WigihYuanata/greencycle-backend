@@ -87,6 +87,7 @@ class RewardResponse(BaseModel):
     qr_code_url: str
     cafe_name: str
     sisa_point: int
+    expires_at: datetime
 
     class Config:
         from_attributes=True
@@ -103,6 +104,7 @@ class VoucherCatalogCreate(BaseModel):
     cafe_name: str
     description: Optional[str]= None
     milestone_threshold: int=Field(default=0, ge=0)
+    voucher_duration_days: int=Field(default=7, ge=1)
 
 class VoucherCatalogResponse(BaseModel):
     id: int
@@ -112,6 +114,7 @@ class VoucherCatalogResponse(BaseModel):
     description: Optional[str]
     is_active: bool
     milestone_threshold: int
+    voucher_duration_days: int
     class Config:
         from_attributes=True
 class TransactionHistory(BaseModel):
@@ -131,6 +134,7 @@ class RewardHistory(BaseModel):
     amount: int
     status: str
     created_at: datetime
+    expires_at: Optional[datetime]=None
 
     class Config:
         from_attributes=True
