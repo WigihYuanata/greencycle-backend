@@ -102,7 +102,7 @@ def send_reset_email(target_email, token):
     msg.attach(MIMEText(body, 'plain'))
 
     try:
-        server= smtplib.SMTP('smtp.gmail.com', 587)
+        server = smtplib.SMTP('smtp.gmail.com', 587)
         server.starttls()
         server.login(EMAIL_SENDER, EMAIL_PASSWORD)
         server.send_message(msg)
