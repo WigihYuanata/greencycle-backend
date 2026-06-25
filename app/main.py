@@ -91,6 +91,7 @@ def send_reset_email(target_email, token):
     Gunakan kode berikut untuk memverifikasi identitas anda:
     
     Kode: {token}
+
     Kode ini bersifat rahasia. Jangan berikan kepada siapapun termasuk tim GCM.
 
     Salam,
@@ -126,7 +127,7 @@ def is_row_sampah(existing_user):
         return False
     if existing_user.reset_token_expire is None:
         return False
-    return datetime.now(timezone.utc) > existing_user.reset_token_expire.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) > existing_user.reset_token_expire
 
 def create_access_token(data: dict):
     to_encode= data.copy()
@@ -252,7 +253,7 @@ def verify_registration_otp(data: OTPVerify, bg_task: BackgroundTasks, db: Sessi
         raise HTTPException(status_code=400, detail="Akun anda sudah terverifikasi sebelumnya")
     if user.reset_token!= data.otp_code:
         raise HTTPException(status_code=400, detail="Kode OTP tidak valid/salah")
-    if user.reset_token_expire is None or datetime.now(timezone.utc)> user.reset_token_expire.replace(tzinfo=timezone.utc):
+    if user.reset_token_expire is None or datetime.now(timezone.utc)> user.reset_token_expire:
         raise HTTPException(status_code=400, detail= "Kode OTP sudah kedaluarsa, silahkan minta kode baru")
     
     user.is_verified=True
@@ -273,7 +274,11 @@ def verify_registration_otp(data: OTPVerify, bg_task: BackgroundTasks, db: Sessi
     ]
 
     bg_task.add_task(push_to_sheet, ws_users, row_data)
-    return user
+    return{
+        "message": "Verifikasi berhasil. Silahkan Login ke akun GCM",
+        "npm":user.npm,
+        "is_verified": True
+    }
 
 @app.post("/users/resend-otp/")
 @limiter.limit("3/minute")
@@ -342,7 +347,7 @@ def reset(data: ResetPinExecute, db: Session=Depends(get_db)):
     user= db.query(User).filter(User.npm==data.npm).first()
     if not user or user.reset_token !=data.kode_verifikasi:
         raise HTTPException(status_code=400, detail="Token reset tidak valid atau kadaluwarsa")
-    if user.reset_token_expire is None or datetime.now(timezone.utc)>user.reset_token_expire.replace(tzinfo=timezone.utc):
+    if user.reset_token_expire is None or datetime.now(timezone.utc)>user.reset_token_expire:
         raise HTTPException(status_code=400, detail="Kode Verifikasi telah kadaluwarsa")
     user.hashed_pin=get_pin(data.new_pin)
     user.reset_token=None
@@ -569,7 +574,7 @@ def get_leaderboard(db: Session=Depends(get_db)):
 
     return {"Top_10_GCM_Contributor": ranking}
 
-@app.get("/voucher/public-verify/P{secure_token}")
+@app.get("/voucher/public-verify/{secure_token}")
 def verify_voucher_qr(secure_token: str, db: Session=Depends(get_db)):
     vouch=db.query(reward).filter(reward.secure_token==secure_token).first()
     if not vouch:
@@ -578,7 +583,7 @@ def verify_voucher_qr(secure_token: str, db: Session=Depends(get_db)):
         raise HTTPException(status_code=400, detail="Maaf voucher yang akan digunakan telah terpakai sebelumnya")
     if vouch.status=="Kadaluarsa":
         raise HTTPException(status_code=400, detail="Maaf voucher ini sudah kadaluarsa dan tidak dapat digunakan")
-    if vouch.expires_at is not None and datetime.now(timezone.utc)>vouch.expires_at.replace(tzinfo=timezone.utc):
+    if vouch.expires_at is not None and datetime.now(timezone.utc)>vouch.expires_at:
         vouch.status="Kadaluarsa"
         db.commit()
         raise HTTPException(status_code=400, detail="Maaf voucher ini sudah kadaluarsa dan tidak dapat digunakan")
@@ -598,7 +603,7 @@ def verify_voucher_qr(secure_token: str, db: Session=Depends(get_db)):
         }
 
     }
-@app.get("/voucher/public-consume/P{secure_token}")
+@app.get("/voucher/public-consume/{secure_token}")
 def consume_voucher_qr(secure_token: str, bg_tasks: BackgroundTasks, db:Session=Depends(get_db)):
     vouch= db.query(reward).filter(reward.secure_token==secure_token).with_for_update().first()
     if not vouch:
@@ -607,7 +612,7 @@ def consume_voucher_qr(secure_token: str, bg_tasks: BackgroundTasks, db:Session=
         raise HTTPException(status_code=400, detail="Tidak dapat ditukar, Voucher sudah pernah digunakan")
     if vouch.status=="Kadaluarsa":
         raise HTTPException(status_code=400, detail="Tidak dapat menukar voucher, voucher sudah kadaluarsa")
-    if vouch.expires_at is not None and datetime.now(timezone.utc)>vouch.expires_at.replace(tzinfo=timezone.utc):
+    if vouch.expires_at is not None and datetime.now(timezone.utc)>vouch.expires_at:
         vouch.status="Kadaluarsa"
         db.commit()
         raise HTTPException(status_code=400, detail="Tidak dapat menukar voucher, voucher sudah kadaluarsa")
@@ -652,14 +657,29 @@ def  update_machine_status(data: MachineStatusUpdate, bg_tasks: BackgroundTasks,
     db.commit()
     db.refresh(mesin)
 
+    if mesin.capacity_max<=0:
+        return{
+            "machine_id": mesin.machine_id,
+            "status":"Error",
+            "message":"Kapasitas maksimum mesin tidak boleh 0 atau negatif"
+        }
     pct=mesin.capacity_current/mesin.capacity_max
-    sudah_notifikasi_hari_ini=mesin.last_notification_time is not None and mesin.last_notification_time.date()==datetime.now(ZoneInfo("Asia/Jakarta")).date()
- 
+
+    if pct<0.15 and mesin.last_notification_time is not None:
+        mesin.last_notification_time=None
+        db.commit()
+
+    waktu_wib_sekarang= datetime.now(timezone.utc).astimezone(ZoneInfo("Asia/Jakarta"))
+    sudah_notifikasi_hari_ini=(
+        mesin.last_notification_time is not None 
+        and mesin.last_notification_time.astimezone(ZoneInfo("Asia/Jakarta")).date()==waktu_wib_sekarang.date())
+    
+    notifikasi_dikirim=False
     if pct >= CAPACITY_MAKS and not sudah_notifikasi_hari_ini:
-        mesin.last_notification_time=datetime.now(ZoneInfo("Asia/Jakarta"))
+        mesin.last_notification_time=datetime.now(timezone.utc)
         db.commit()
         bg_tasks.add_task(send_capacity_alert, mesin.machine_id, pct)
+        notifikasi_dikirim=True
 
-    notifikasi_kapasitas=pct >= CAPACITY_MAKS and not sudah_notifikasi_hari_ini
     status_kapasitas= "Hampir Penuh" if pct>= CAPACITY_MAKS else "Normal"
-    return {"machine_id": mesin.machine_id, "kapasitas": f"{pct*100:.1f}", "status":status_kapasitas, "notifikasi": notifikasi_kapasitas}
+    return {"machine_id": mesin.machine_id, "kapasitas": f"{pct*100:.1f}", "status":status_kapasitas, "notifikasi": notifikasi_dikirim}

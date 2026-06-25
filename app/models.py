@@ -13,7 +13,7 @@ class User(Base):
 
     hashed_pin= Column(String, index=True, nullable=False)
     reset_token= Column(String, index=True, nullable= True)
-    reset_token_expire=Column(DateTime, nullable=True)
+    reset_token_expire=Column(DateTime(timezone=True), nullable=True)
     is_verified=Column(Boolean, default=False)
     
     transactions= relationship("Transaction", back_populates="user")
@@ -29,7 +29,7 @@ class Transaction(Base):
     bottle_large= Column(Integer, default=0)
 
     points= Column(Integer)
-    created_at=Column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
+    created_at=Column(DateTime(timezone=True), server_default=text('CURRENT_TIMESTAMP'))
     user= relationship("User", back_populates="transactions")
 
 class reward(Base):
@@ -43,8 +43,8 @@ class reward(Base):
     secure_token=Column(String(36), unique=True, index=True, nullable=True)
     
     status=Column(String, default="Active")
-    created_at= Column(DateTime, server_default=text('CURRENT_TIMESTAMP'))
-    expires_at=Column(DateTime, nullable=True)
+    created_at= Column(DateTime(timezone=True), server_default=text('CURRENT_TIMESTAMP'))
+    expires_at=Column(DateTime(timezone=True), nullable=True)
 
     user= relationship("User", back_populates="reward")
     catalog=relationship("VoucherCatalog")
@@ -66,5 +66,5 @@ class MachineStatus(Base):
     machine_id= Column(String(50), nullable=False, unique=True)
     capacity_current=Column(Integer, default=0)
     capacity_max=Column(Integer, nullable=False)
-    last_notification_time=Column(DateTime, nullable=True)
+    last_notification_time=Column(DateTime(timezone=True), nullable=True)
     updated_at= Column(DateTime, server_default=text('CURRENT_TIMESTAMP'), onupdate=text('CURRENT_TIMESTAMP'))
