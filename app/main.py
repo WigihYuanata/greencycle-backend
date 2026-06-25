@@ -102,14 +102,17 @@ def send_reset_email(target_email, token):
     msg.attach(MIMEText(body, 'plain'))
 
     try:
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
+        print("STEP 1: Membuka koneksi SMTP...")
+        server = smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10)
+        print("STEP 2: Berhasil terhubung ke SMTP")
         server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+        print("STEP 3: Login berhasil")
         server.send_message(msg)
+        print("STEP 4: Email berhasil dikirim")
         server.quit()
         print(f"INFO: Email reset berhasil dikirim ke {target_email}")
     except Exception as e:
-        print(f"ERROR: Gagal mengirim email: {e}")
+        print(f"ERROR: {type(e).__name__}: {e}")
 
 
 
