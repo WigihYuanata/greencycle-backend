@@ -16,6 +16,7 @@ import gspread
 from datetime import datetime, timezone, timedelta
 import os
 import smtplib
+import json
 import requests as req
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -148,9 +149,6 @@ def get_current_user(credentials: HTTPAuthorizationCredentials=Depends(bearer_sc
     return user
 
 
-BASE_DIREKTORI=(os.path.dirname(os.path.abspath(__file__)))
-
-credential_path= os.path.join(BASE_DIREKTORI, 'credentials.json')
 Base.metadata.create_all(bind=engine)
 with engine.connect() as conn:
     conn.execute(text(""" ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expire TIMESTAMP;"""))
@@ -186,7 +184,11 @@ def machine_validate(api_key: str= Security(api_key_header)):
     return api_key
 ws_users=ws_trans=ws_reward=None
 try:
-    gc= gspread.service_account(filename=credential_path)
+    credentials_json=os.getenv("GOOGLE_CREDENTIALS")
+    if not credentials_json:
+        raise RuntimeError("GOOGLE_CREDENTIALS belum diatur")
+    credentials_dict=json.loads(credentials_json)
+    gc= gspread.service_account_from_dict(credentials_dict)
     sh= gc.open("GreenCycle")
     ws_users= sh.worksheet("Data_Kontributor")
     ws_trans= sh.worksheet("Transaksi")
