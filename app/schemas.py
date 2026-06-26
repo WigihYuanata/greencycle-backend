@@ -27,9 +27,7 @@ class UserCreate(BaseModel):
 class UserLogin(BaseModel):
     npm: str
     pin: str
-class UserUpdate(BaseModel):
-    name: Optional[str]=None
-    faculty:Optional[str]=None
+    
 class Token(BaseModel):
     access_token: str
     token_type: str
@@ -48,18 +46,6 @@ class ResetPinExecute(BaseModel):
             raise ValueError('PIN harus berupa angka 6 digit')
         return v
         
-
-
-class UserResponse(BaseModel):
-    id: int
-    npm: str
-    name: str
-    email: str
-    phone_number: str
-
-
-    class Config:
-        from_attributes=True
 
 class TransactionCreate(BaseModel):
     npm: str

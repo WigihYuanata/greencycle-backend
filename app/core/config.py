@@ -4,8 +4,6 @@ class Settings(BaseSettings):
     PROJECT_NAME: str
     DATABASE_URL: str
     API_KEY_MESIN: str
-    EMAIL_SENDER: str
-    EMAIL_PASSWORD: str
     SECRET_KEY: str
     WHATSAPP_API_URL: str
     WHATSAPP_API_TOKEN: str

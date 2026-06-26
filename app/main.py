@@ -9,17 +9,14 @@ from sqlalchemy import func, desc, text
 from app.core.config import settings
 from app.core.database import engine, Base, get_db
 from app.models import User, Transaction, reward, VoucherCatalog, MachineStatus
-from app.schemas import UserCreate, UserResponse, TransactionCreate, TransactionResponse, RewardCreate, RewardResponse, UserLogin, Token, ForgotPin, ResetPinExecute, VoucherCatalogCreate, VoucherCatalogResponse, TransactionHistory, RewardHistory, UserUpdate, MachineStatusUpdate, QRVerifyRequest, OTPVerify, ResendOTP
+from app.schemas import UserCreate, TransactionCreate, TransactionResponse, RewardCreate, RewardResponse, UserLogin, Token, ForgotPin, ResetPinExecute, VoucherCatalogCreate, VoucherCatalogResponse, TransactionHistory, RewardHistory, MachineStatusUpdate, QRVerifyRequest, OTPVerify, ResendOTP
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 import gspread
 from datetime import datetime, timezone, timedelta
 import os
-import smtplib
 import json
 import requests as req
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from zoneinfo import ZoneInfo
 import uuid
 import secrets
@@ -28,8 +25,6 @@ from typing import List
 SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = settings.ALGORITHM
 ACCESS_TOKEN_EXPIRE_DAY =7
-EMAIL_SENDER=settings.EMAIL_SENDER
-EMAIL_PASSWORD=settings.EMAIL_PASSWORD
 
 WHATSAPP_API_URL=settings.WHATSAPP_API_URL
 WHATSAPP_API_TOKEN=settings.WHATSAPP_API_TOKEN
@@ -59,7 +54,9 @@ def send_registration_whatsapp(target_phone, otp_code):
         f"*[GCM SYSTEM - Verifikasi Pendaftaran]*\n\n"
         f"Selamat datang di Green Collective Movement!\n"
         f"Kode OTP Anda untuk menyelesaikan pendaftaran akun:\n\n"
+
         f"*{otp_code}*\n\n"
+
         f"_Kode ini berlaku selama 15 menit. Jangan berikan kepada siapapun termasuk Tim GCM._"
     )
     try:
@@ -79,42 +76,31 @@ def send_registration_whatsapp(target_phone, otp_code):
         print(f"ERROR: Gagal mengirim pesan OTP pendaftaran ke {target_phone} : {e} ")
         notifikasi_admin_telegram(f"[GCM - PERINGATAN] Exception saat mengirim OTP ke {target_phone}: {e}")
 
-def send_reset_email(target_email, token):
-    msg=MIMEMultipart()
-    msg['From']=EMAIL_SENDER
-    msg['To']=target_email
-    msg['Subject']="[GCM] Kode Verifikasi Reset PIN"
+def send_forgot_pin_wa(target_phone, otp_code):
+    message=(
+        f"*[GCM SYSTEM - Reset PIN]*\n\n"
+        f"Kami menerima permintaan reset PIN untuk akun GCM anda.\n"
+        f"Kode verifikasi reset PIN Anda:\n\n"
 
-    body= f"""Yth Mahasiswa UPNVJT,
-
-    
-    Kami menerima permintaan reset PIN untuk akun GCM anda.
-    Gunakan kode berikut untuk memverifikasi identitas anda:
-    
-    Kode: {token}
-
-    Kode ini bersifat rahasia. Jangan berikan kepada siapapun termasuk tim GCM.
-
-    Salam,
-    GreenCollectiveMovement Team - Teaching Industry UPNVJT
-
-"""
-    msg.attach(MIMEText(body, 'plain'))
-
+        f"*{otp_code}*\n\n"
+        f"Kode ini berlaku selama 15 menit. Jangan berikan kode ini kepada siapaun termasuk tim GCM. Jika anda tidak meminta reset PIN, abaikan pesan ini"
+    )
     try:
-        print("STEP 1: Membuka koneksi SMTP...")
-        server = smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=10)
-        print("STEP 2: Berhasil terhubung ke SMTP")
-        server.login(EMAIL_SENDER, EMAIL_PASSWORD)
-        print("STEP 3: Login berhasil")
-        server.send_message(msg)
-        print("STEP 4: Email berhasil dikirim")
-        server.quit()
-        print(f"INFO: Email reset berhasil dikirim ke {target_email}")
+        resp=req.post(WHATSAPP_API_URL, headers={"Authorization":WHATSAPP_API_TOKEN}, json={"target": target_phone, "message": message}, timeout=10)
+        try:
+            resp_data=resp.json()
+        except ValueError:
+            resp_data={}
+        gagal_dari_gateway=resp.status_code !=200 or resp_data.get("status") is False
+
+        if gagal_dari_gateway:
+            print(f"ERROR: Gateway WA menolak/gagal mengirim OTP reset PIN ke {target_phone} - status_code: {resp.status_code}, response: {resp_data}")
+            notifikasi_admin_telegram(f"[GCM - PERINGATAN] Ggagl Kirim OTP reset PIN ke nomor {target_phone}. \nResponse gateway WA: {resp_data}")
+        else:
+            print(f"INFO: Pesan reset PIN berhasil dikirim ke nomor: {target_phone}")
     except Exception as e:
-        print(f"ERROR: {type(e).__name__}: {e}")
-
-
+        print(f"ERROR: Gagal mengirim pesan OTP reset PIN ke {target_phone}: {e}")
+        notifikasi_admin_telegram(f"[GCM - PERINGATAN] Exception saat  mengirim OTP reset PIN ke {target_phone}: {e}")
 
 def get_pin(pin): return pwd_context.hash(pin)
 def verifikasi_pin(plain_pin, hashed_pin): return pwd_context.verify(plain_pin, hashed_pin)
@@ -123,15 +109,6 @@ def generate_otp():
     otp_token=str(secrets.randbelow(900000)+100000)
     waktu_expire=datetime.now(timezone.utc)+timedelta(minutes=15)
     return otp_token, waktu_expire
-
-def is_row_sampah(existing_user):
-    if existing_user is None:
-        return False
-    if existing_user.is_verified:
-        return False
-    if existing_user.reset_token_expire is None:
-        return False
-    return datetime.now(timezone.utc) > existing_user.reset_token_expire
 
 def create_access_token(data: dict):
     to_encode= data.copy()
@@ -215,42 +192,50 @@ def home():
     "project": settings.PROJECT_NAME}     
     
 @app.post("/users/")
-def create_user(user: UserCreate, bg_task: BackgroundTasks, db: Session=Depends(get_db)):
-    existing_npm=db.query(User).filter(User.npm==user.npm).first()
-    if existing_npm:
-        if is_row_sampah(existing_npm):
-            db.delete(existing_npm)
-            db.commit()
-        else:
-            raise HTTPException(status_code=400, detail="NPM sudah terdaftar di sistem GCM")
+@limiter.limit("30/15minutes")
+def create_user(request: Request, user: UserCreate, bg_task: BackgroundTasks, db: Session=Depends(get_db)):
+    existing_npm=db.query(User).filter(User.npm==user.npm).with_for_update().first()
     
-    existing_email=db.query(User).filter(User.email==user.email).first()
+    if existing_npm and existing_npm.is_verified:
+        raise HTTPException(status_code=400, detail="NPM sudah terdaftar di sistem GCM. Silahkan Login")
+    
+    
+    existing_email=db.query(User).filter(User.email==user.email, User.npm!=user.npm).first()
     if existing_email:
-        if is_row_sampah(existing_email):
-            db.delete(existing_email)
-            db.commit()
-        else:
-            raise HTTPException(status_code=400, detail="Email sudah terdaftar di sistem GCM. Mohon gunakan email lain")
-    existing_phone=db.query(User).filter(User.phone_number==user.phone_number).first()
+        raise HTTPException(status_code=400, detail="Email sudah terdaftar di sistem GCM. Mohon gunakan email lain")
+    
+    existing_phone=db.query(User).filter(User.phone_number==user.phone_number, User.npm!=user.npm).first()
     if existing_phone:
-        if is_row_sampah(existing_phone):
-            db.delete(existing_phone)
-            db.commit()
-        else:
-            raise HTTPException(status_code=400, detail="Nomor telepon sudah terdaftar ke sistem GCM. Mohon gunakan nomor telepon lain")
+        raise HTTPException(status_code=400, detail="Nomor telepon sudah terdaftar ke sistem GCM. Mohon gunakan nomor telepon lain")
+    
     otp_token, waktu_expire=generate_otp()
 
-    new_user= User(npm=user.npm, name= user.name, faculty=user.faculty, email=user.email, phone_number=user.phone_number, hashed_pin=get_pin(user.pin), reset_token=otp_token, reset_token_expire=waktu_expire, is_verified=False)
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
+    if existing_npm:
+        existing_npm.name=user.name
+        existing_npm.faculty=user.faculty
+        existing_npm.email=user.email
+        existing_npm.phone_number=user.phone_number
+        existing_npm.hashed_pin=get_pin(user.pin)
+        existing_npm.reset_token=otp_token
+        existing_npm.reset_token_expire=waktu_expire
+        db.commit()
+        target_phone=existing_npm.phone_number
+        target_npm=existing_npm.npm
 
-    if user.phone_number:
-        bg_task.add_task(send_registration_whatsapp, user.phone_number, otp_token)
-    return {"message": "Pendaftaran awal berhasil. Silahkan masukan kode OTP yang dikirim ke WhatsApp anda.", "npm": new_user.npm}
+    else:
+        new_user= User(npm=user.npm, name= user.name, faculty=user.faculty, email=user.email, phone_number=user.phone_number, hashed_pin=get_pin(user.pin), reset_token=otp_token, reset_token_expire=waktu_expire, is_verified=False)
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        target_phone=new_user.phone_number
+        target_npm=new_user.npm
+
+    bg_task.add_task(send_registration_whatsapp, target_phone, otp_token)
+    return {"message": "Pendaftaran awal berhasil. Silahkan masukan kode OTP yang dikirim ke WhatsApp anda.", "npm": target_npm}
 
 @app.post("/users/verify-otp/")
-def verify_registration_otp(data: OTPVerify, bg_task: BackgroundTasks, db: Session=Depends(get_db)):
+@limiter.limit("20/15minutes")
+def verify_registration_otp(request: Request, data: OTPVerify, bg_task: BackgroundTasks, db: Session=Depends(get_db)):
     user=db.query(User).filter(User.npm==data.npm).first()
     if not user:
         raise HTTPException(status_code=404, detail="User tidak ditemukan.")
@@ -286,7 +271,7 @@ def verify_registration_otp(data: OTPVerify, bg_task: BackgroundTasks, db: Sessi
     }
 
 @app.post("/users/resend-otp/")
-@limiter.limit("3/minute")
+@limiter.limit("10/15minutes")
 def resend_otp(request: Request, data: ResendOTP, bg_task: BackgroundTasks, db: Session=Depends(get_db)):
     user=db.query(User).filter(User.npm==data.npm).first()
     if not user:
@@ -315,16 +300,6 @@ def verify_qr_code(npm:str, db: Session=Depends(get_db), kunci:str=Depends(machi
 def get_user_qr(current_user: User=Depends(get_current_user)):
     qr_url=f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={current_user.npm}"
     return {"npm": current_user.npm, "qr_code_url": qr_url, "message": "Gunakan QR ini untuk melakukan transaksi di mesin GCM. Pastikan QR dapat dipindai dengan jelas untuk menghindari kegagalan transaksi."}
-
-@app.put("/users/profile", response_model=UserResponse)
-def update_profile(data: UserUpdate, db: Session=Depends(get_db), current_user: User=Depends(get_current_user)):
-    if data.name:
-        current_user.name=data.name
-    if data.faculty:
-        current_user.faculty=data.faculty
-    db.commit()
-    db.refresh(current_user)
-    return current_user
     
 @app.post("/auth/login/", response_model=Token)
 def login(data: UserLogin, db: Session=Depends(get_db)):
@@ -337,18 +312,23 @@ def login(data: UserLogin, db: Session=Depends(get_db)):
     return{"access_token": access_token, "token_type": "bearer"}
 
 @app.post("/auth/forgot-pin/")
-def forgot_pin(data: ForgotPin, bg_task: BackgroundTasks, db: Session=Depends(get_db)):
+@limiter.limit("10/15minutes")
+def forgot_pin(request: Request, data: ForgotPin, bg_task: BackgroundTasks, db: Session=Depends(get_db)):
     user=db.query(User).filter(User.npm==data.npm).first()
     if not user: raise HTTPException(status_code=404, detail="NPM tidak terdaftar")
+    
+    if not user.is_verified:
+        raise HTTPException(status_code= 400, detail="Akun belum diverifikasi.Selesaikan verifikasi OTP pendaftaran terlebih dahulu")
     reset_token=str(secrets.randbelow(900000)+ 100000)
     user.reset_token=reset_token
     user.reset_token_expire= datetime.now(timezone.utc)+timedelta(minutes=15)
     db.commit()
-    bg_task.add_task(send_reset_email, user.email,reset_token)
-    return {"message": f"Token reset telah dikirim ke email {user.email}"}
+    bg_task.add_task(send_forgot_pin_wa, user.phone_number, reset_token)
+    return {"message": f"Kode verifikasi reset PIN telah dikirim ke nomor {user.phone_number}"}
 
 @app.post("/auth/reset-pin")
-def reset(data: ResetPinExecute, db: Session=Depends(get_db)):
+@limiter.limit("20/15minutes")
+def reset(request: Request, data: ResetPinExecute, db: Session=Depends(get_db)):
     user= db.query(User).filter(User.npm==data.npm).first()
     if not user or user.reset_token !=data.kode_verifikasi:
         raise HTTPException(status_code=400, detail="Token reset tidak valid atau kadaluwarsa")
@@ -474,7 +454,7 @@ def redeem_reward(data: RewardCreate, bg_task: BackgroundTasks, db: Session=Depe
     db.commit()
     db.refresh(new_voucher)
     waktu_sekarang=datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M:%S")
-    row_data=[new_voucher.id, waktu_sekarang, user.npm, user.name, voucher_type.point_cost, unique_code, "Selasar Caffe", "Active"]
+    row_data=[new_voucher.id, waktu_sekarang, user.npm, user.name, voucher_type.point_cost, unique_code, voucher_type.cafe_name, "Active"]
     bg_task.add_task(push_to_sheet, ws_reward, row_data)
     tautan_kasir =f"{settings.BASE_URL}/kasir?kode={crypto_token}" 
     return {
