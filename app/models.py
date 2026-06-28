@@ -15,6 +15,7 @@ class User(Base):
     reset_token= Column(String, index=True, nullable= True)
     reset_token_expire=Column(DateTime(timezone=True), nullable=True)
     is_verified=Column(Boolean, default=False)
+    qr_token=Column(String(36), unique=True, index=True, nullable=True)
     
     transactions= relationship("Transaction", back_populates="user")
     reward=relationship("reward", back_populates="user")
@@ -59,6 +60,7 @@ class VoucherCatalog(Base):
     is_active=Column(Boolean, default=True)
     milestone_threshold=Column(Integer, default=0, nullable=False)
     voucher_duration_days=Column(Integer, default=7, nullable=False)
+    image_url=Column(String, nullable=True)
 
 class MachineStatus(Base):
     __tablename__="machine_status"

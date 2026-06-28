@@ -1,10 +1,20 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, AfterValidator
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Optional, Annotated
+
+
+def validasi_npm(v: str) -> str:
+    if not v.isdigit():
+        raise ValueError('NPM harus berupa angka (digit) saja')
+    if len(v)<10:
+        raise ValueError('NPM minimal harus terdiri dari 10 digit')
+    return v
+
+NpmStr= Annotated[str, AfterValidator(validasi_npm)]
 
 class UserCreate(BaseModel):
-    npm: str
+    npm: NpmStr
     name: str
     faculty: str
     email: str
@@ -25,7 +35,7 @@ class UserCreate(BaseModel):
     
 
 class UserLogin(BaseModel):
-    npm: str
+    npm: NpmStr
     pin: str
     
 class Token(BaseModel):
@@ -33,10 +43,10 @@ class Token(BaseModel):
     token_type: str
 
 class ForgotPin(BaseModel):
-    npm: str
+    npm: NpmStr
 
 class ResetPinExecute(BaseModel):
-    npm: str
+    npm: NpmStr
     kode_verifikasi: str
     new_pin: str= Field(min_length=6, max_length=6)
     @field_validator('new_pin')
@@ -48,7 +58,7 @@ class ResetPinExecute(BaseModel):
         
 
 class TransactionCreate(BaseModel):
-    npm: str
+    npm: NpmStr
     bottle_small: int=Field(default=0, ge=0)
     bottle_medium: int=Field(default=0, ge=0)
     bottle_large: int= Field(default=0, ge=0)
@@ -91,6 +101,7 @@ class VoucherCatalogCreate(BaseModel):
     description: Optional[str]= None
     milestone_threshold: int=Field(default=0, ge=0)
     voucher_duration_days: int=Field(default=7, ge=1)
+    image_url: Optional[str]=None
 
 class VoucherCatalogResponse(BaseModel):
     id: int
@@ -101,6 +112,8 @@ class VoucherCatalogResponse(BaseModel):
     is_active: bool
     milestone_threshold: int
     voucher_duration_days: int
+    image_url: Optional[str]=None
+
     class Config:
         from_attributes=True
 class TransactionHistory(BaseModel):
@@ -126,11 +139,11 @@ class RewardHistory(BaseModel):
         from_attributes=True
 
 class QRVerifyRequest(BaseModel):
-    npm: str
+    npm: NpmStr
 
 class OTPVerify(BaseModel):
-    npm: str
+    npm: NpmStr
     otp_code: str
 
 class ResendOTP(BaseModel):
-    npm:str
+    npm: NpmStr

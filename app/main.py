@@ -138,7 +138,12 @@ with engine.connect() as conn:
     conn.execute(text("""ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;"""))
     conn.execute(text("""ALTER TABLE rewards ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP;"""))
     conn.execute(text("""ALTER TABLE voucher_catalog ADD COLUMN IF NOT EXISTS voucher_duration_days INTEGER DEFAULT 7;"""))
+    conn.execute(text("""ALTER TABLE users ADD COLUMN IF NOT EXISTS qr_token VARCHAR(36) UNIQUE;"""))
+    conn.execute(text("""ALTER TABLE voucher_catalog ADD COLUMN IF NOT EXISTS image_url VARCHAR;"""))
     conn.commit()
+
+
+
 app= FastAPI(title=settings.PROJECT_NAME)
 
 app.add_middleware(
@@ -223,7 +228,7 @@ def create_user(request: Request, user: UserCreate, bg_task: BackgroundTasks, db
         target_npm=existing_npm.npm
 
     else:
-        new_user= User(npm=user.npm, name= user.name, faculty=user.faculty, email=user.email, phone_number=user.phone_number, hashed_pin=get_pin(user.pin), reset_token=otp_token, reset_token_expire=waktu_expire, is_verified=False)
+        new_user= User(npm=user.npm, name= user.name, faculty=user.faculty, email=user.email, phone_number=user.phone_number, hashed_pin=get_pin(user.pin), reset_token=otp_token, reset_token_expire=waktu_expire, is_verified=False, qr_token=str(uuid.uuid4()))
         db.add(new_user)
         db.commit()
         db.refresh(new_user)
@@ -287,18 +292,18 @@ def resend_otp(request: Request, data: ResendOTP, bg_task: BackgroundTasks, db: 
     bg_task.add_task(send_registration_whatsapp, user.phone_number, otp_token)
     return {"message": f"Kode OTP baru telah dikirim ke WhatsApp {user.phone_number}"}
 
-@app.get("/machine/verify/{npm}")
-def verify_qr_code(npm:str, db: Session=Depends(get_db), kunci:str=Depends(machine_validate)):
-    user=db.query(User).filter(User.npm==npm).first()
+@app.get("/machine/verify/{qr_token}")
+def verify_qr_code(qr_token:str, db: Session=Depends(get_db), kunci:str=Depends(machine_validate)):
+    user=db.query(User).filter(User.qr_token==qr_token).first()
     if not user:
-        raise HTTPException(status_code=404, detail="NPM belum terdaftar. Silahkan registrasi terlebih dahulu melalui web GCM")
+        raise HTTPException(status_code=404, detail="QR tidak valid atau belum terdaftar. Silahkan registrasi terlebih dahulu melalui web GCM")
     if not user.is_verified:
         raise HTTPException(status_code=403, detail="Akun belum diverifikasi OTP. Selesaikan verifikasi WhatsApp di web GCM terlebih dahulu sebelum menggunakan Vending Machine")
     return {"status": "Akses diberikan", "npm": user.npm, "nama": user.name, "instruksi_mesin": "Buka pintu masuk botol"}
 
 @app.get("/users/my-qr")
 def get_user_qr(current_user: User=Depends(get_current_user)):
-    qr_url=f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={current_user.npm}"
+    qr_url=f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={current_user.qr_token}"
     return {"npm": current_user.npm, "qr_code_url": qr_url, "message": "Gunakan QR ini untuk melakukan transaksi di mesin GCM. Pastikan QR dapat dipindai dengan jelas untuk menghindari kegagalan transaksi."}
     
 @app.post("/auth/login/", response_model=Token)
@@ -510,7 +515,7 @@ def get_dashboard_data(db: Session=Depends(get_db), current_user: User=Depends(g
         "faculty": user.faculty,
         "email": user.email,
         "phone_number": user.phone_number,
-        "qr_code_url": f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={user.npm}"
+        "qr_code_url": f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={user.qr_token}"
 
         },
         "statistik_finansial":{
