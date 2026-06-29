@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Security, Request
+from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Security, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import APIKeyHeader, HTTPBearer, HTTPAuthorizationCredentials
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -536,12 +536,12 @@ def get_dashboard_data(db: Session=Depends(get_db), current_user: User=Depends(g
     }
 
 @app.get("/transaction/history", response_model=List[TransactionHistory])
-def get_history_transaksi(skip: int=0, limit: int=20, db:Session=Depends(get_db), current_user:User=Depends(get_current_user)):
+def get_history_transaksi(skip: int = Query(0, ge=0), limit: int=Query(20, ge=1, le=100), db:Session=Depends(get_db), current_user:User=Depends(get_current_user)):
     return db.query(Transaction).filter(Transaction.user_id==current_user.id).order_by(desc(Transaction.created_at)).offset(skip).limit(limit).all()
 
 
 @app.get("/redeem/history", response_model=List[RewardHistory])
-def get_kode_redeem(skip: int=0, limit: int=20, db:Session=Depends(get_db), current_user:User=Depends(get_current_user)):
+def get_kode_redeem(skip: int= Query(0, ge=0), limit: int=Query(20, ge=1, le=100), db:Session=Depends(get_db), current_user:User=Depends(get_current_user)):
     return db.query(reward).filter(reward.user_id==current_user.id).order_by(desc(reward.created_at)).offset(skip).limit(limit).all()
 @app.get("/leaderboard/")
 def get_leaderboard(db: Session=Depends(get_db)):
