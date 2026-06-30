@@ -10,6 +10,14 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str
     TELEGRAM_CHAT_ID: str
 
+    HARGA_BOTOL_KECIL: int
+    HARGA_BOTOL_SEDANG: int
+    HARGA_BOTOL_BESAR: int
+
+
+    ACCESS_TOKEN_EXPIRE_DAY: int
+    CAPACITY_MAKS: float
+
     ALGORITHM: str="HS256"
     ORIGINS_DIIZINKAN: str="http://localhost:3000"
     BASE_URL: str="http://localhost:8000"
