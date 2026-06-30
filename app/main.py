@@ -4,7 +4,7 @@ from fastapi.security import APIKeyHeader, HTTPBearer, HTTPAuthorizationCredenti
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, desc, text
 from app.core.config import settings
 from app.core.database import engine, Base, get_db
@@ -542,7 +542,51 @@ def get_history_transaksi(skip: int = Query(0, ge=0), limit: int=Query(20, ge=1,
 
 @app.get("/redeem/history", response_model=List[RewardHistory])
 def get_kode_redeem(skip: int= Query(0, ge=0), limit: int=Query(20, ge=1, le=100), db:Session=Depends(get_db), current_user:User=Depends(get_current_user)):
-    return db.query(reward).filter(reward.user_id==current_user.id).order_by(desc(reward.created_at)).offset(skip).limit(limit).all()
+    waktu_sekarang_utc=datetime.now(timezone.utc)
+    rows_terupdate=db.query(reward).filter(
+        reward.user_id==current_user.id,
+        reward.status=="Active",
+        reward.expires_at.isnot(None),
+        reward.expires_at<waktu_sekarang_utc
+    ).update({"status": "Kadaluarsa"}, synchronize_session=False)
+    
+    if rows_terupdate>0:
+        db.commit()
+    
+    daftar_reward=db.query(reward).options(
+        joinedload(reward.catalog)
+    ).filter(
+        reward.user_id==current_user.id
+    ).order_by(desc(reward.created_at)).offset(skip).limit(limit).all()
+
+    hasil=[]
+    
+    for r in daftar_reward:
+        if r.status=="Active":
+            tautan_kasir=f"{settings.BASE_URL}/kasir?kode={r.secure_token}"
+            qr_code_url=f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={tautan_kasir}"
+            can_show_qr=True
+        else:
+            qr_code_url=None
+            can_show_qr=False
+
+        hasil.append(RewardHistory(
+            id=r.id,
+            voucher_code=r.voucher_code,
+            amount=r.amount,
+            status=r.status,
+            created_at=r.created_at,
+            expires_at=r.expires_at,
+            voucher_name=r.catalog.name if r.catalog else None,
+            cafe_name=r.catalog.cafe_name if r.catalog else None,
+            image_url=r.catalog.image_url if r.catalog else None,
+            qr_code_url=qr_code_url,
+            can_show_qr=can_show_qr
+        ))
+
+    return hasil
+
+
 @app.get("/leaderboard/")
 def get_leaderboard(db: Session=Depends(get_db)):
     top_contributors=db.query(

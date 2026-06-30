@@ -135,6 +135,12 @@ class RewardHistory(BaseModel):
     created_at: datetime
     expires_at: Optional[datetime]=None
 
+    voucher_name: Optional[str]=None
+    cafe_name: Optional[str]=None
+    qr_code_url: Optional[str]=None
+    image_url: Optional[str]=None
+    can_show_qr: bool=False
+
     class Config:
         from_attributes=True
 
