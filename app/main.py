@@ -261,6 +261,7 @@ def verify_registration_otp(request: Request, data: OTPVerify, bg_task: Backgrou
         user.name,
         user.faculty,
         user.email,
+        user.phone_number,
         (datetime.now(ZoneInfo("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M:%S")),
         '=SUMIF(Transaksi!$D:$D; INDIRECT("C"&ROW()); Transaksi!$G:$G)',
         '=SUMIF(Transaksi!$D:$D; INDIRECT("C"&ROW()); Transaksi!$H:$H)',
