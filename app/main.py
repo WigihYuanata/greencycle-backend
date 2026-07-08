@@ -21,6 +21,10 @@ from zoneinfo import ZoneInfo
 import uuid
 import secrets
 from typing import List
+import segno
+import io
+import base64
+from functools import lru_cache
 
 SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = settings.ALGORITHM
@@ -109,6 +113,14 @@ def generate_otp():
     otp_token=str(secrets.randbelow(900000)+100000)
     waktu_expire=datetime.now(timezone.utc)+timedelta(minutes=15)
     return otp_token, waktu_expire
+
+@lru_cache(maxsize=2000)
+def generate_local_qr(data: str) -> str:
+    qr=segno.make(data, error='h')
+    buffer=io.BytesIO()
+    qr.save(buffer, kind="png", scale=8, border=4)
+    img_base64=base64.b64encode(buffer.getvalue()).decode("utf-8")
+    return f"data:image/png;base64,{img_base64}"
 
 def create_access_token(data: dict):
     to_encode= data.copy()
@@ -304,7 +316,7 @@ def verify_qr_code(qr_token:str, db: Session=Depends(get_db), kunci:str=Depends(
 
 @app.get("/users/my-qr")
 def get_user_qr(current_user: User=Depends(get_current_user)):
-    qr_url=f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={current_user.qr_token}"
+    qr_url=generate_local_qr(current_user.qr_token)
     return {"npm": current_user.npm, "qr_code_url": qr_url, "message": "Gunakan QR ini untuk melakukan transaksi di mesin GCM. Pastikan QR dapat dipindai dengan jelas untuk menghindari kegagalan transaksi."}
     
 @app.post("/auth/login/", response_model=Token)
@@ -516,7 +528,7 @@ def get_dashboard_data(db: Session=Depends(get_db), current_user: User=Depends(g
         "faculty": user.faculty,
         "email": user.email,
         "phone_number": user.phone_number,
-        "qr_code_url": f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={user.qr_token}"
+        "qr_code_url": generate_local_qr(user.qr_token)
 
         },
         "statistik_finansial":{
