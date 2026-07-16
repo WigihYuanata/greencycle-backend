@@ -5,6 +5,10 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     API_KEY_MESIN: str
     SECRET_KEY: str
+
+    RESEND_API_KEY: str
+    RESEND_FROM_EMAIL: str
+    
     WHATSAPP_API_URL: str
     WHATSAPP_API_TOKEN: str
     TELEGRAM_BOT_TOKEN: str

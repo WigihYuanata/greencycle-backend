@@ -5,9 +5,8 @@ from sqlalchemy.orm import relationship
 class User(Base):
     __tablename__="users"
     id= Column(Integer, primary_key=True, index=True)
-    npm= Column(String(20), unique=True, index=True)
+    username= Column(String(30), unique=True, index=True)
     name= Column(String(100), nullable=False)
-    faculty=Column(String(100), nullable=False)
     email=Column(String(100), unique=True, index=True, nullable=False)
     phone_number=Column(String(20), nullable=False, unique=True)
 

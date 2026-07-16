@@ -2,21 +2,22 @@ from pydantic import BaseModel, Field, field_validator, AfterValidator
 from datetime import datetime
 from enum import Enum
 from typing import Optional, Annotated
+import re
 
+def validasi_username(v: str) -> str:
+    if not re.match(r"^[a-zA-Z0-9._]+$", v):
+        raise ValueError("Username hanya boleh berisi huruf, angka, titik (.), dan garis bawah (_)")
+    if " " in v:
+        raise ValueError("Username tidak boleh mengandung spasi")
+    if len(v)< 3 or len(v)>30:
+        raise ValueError("Username harus terdiri dari 3 hingga 30 karakter")
+    return v.lower()
 
-def validasi_npm(v: str) -> str:
-    if not v.isdigit():
-        raise ValueError('NPM harus berupa angka (digit) saja')
-    if len(v)<10:
-        raise ValueError('NPM minimal harus terdiri dari 10 digit')
-    return v
-
-NpmStr= Annotated[str, AfterValidator(validasi_npm)]
+UsernameStr= Annotated[str, AfterValidator(validasi_username)]
 
 class UserCreate(BaseModel):
-    npm: NpmStr
+    username: UsernameStr
     name: str
-    faculty: str
     email: str
     phone_number: str=Field(min_length=9, max_length=15)
     pin: str=Field(min_length=6, max_length=6)
@@ -35,7 +36,7 @@ class UserCreate(BaseModel):
     
 
 class UserLogin(BaseModel):
-    npm: NpmStr
+    username: UsernameStr
     pin: str
     
 class Token(BaseModel):
@@ -43,10 +44,10 @@ class Token(BaseModel):
     token_type: str
 
 class ForgotPin(BaseModel):
-    npm: NpmStr
+    username: UsernameStr
 
 class ResetPinExecute(BaseModel):
-    npm: NpmStr
+    username: UsernameStr
     kode_verifikasi: str
     new_pin: str= Field(min_length=6, max_length=6)
     @field_validator('new_pin')
@@ -58,7 +59,7 @@ class ResetPinExecute(BaseModel):
         
 
 class TransactionCreate(BaseModel):
-    npm: NpmStr
+    username: UsernameStr
     bottle_small: int=Field(default=0, ge=0)
     bottle_medium: int=Field(default=0, ge=0)
     bottle_large: int= Field(default=0, ge=0)
@@ -145,11 +146,11 @@ class RewardHistory(BaseModel):
         from_attributes=True
 
 class QRVerifyRequest(BaseModel):
-    npm: NpmStr
+    username: UsernameStr
 
 class OTPVerify(BaseModel):
-    npm: NpmStr
+    username: UsernameStr
     otp_code: str
 
 class ResendOTP(BaseModel):
-    npm: NpmStr
+    username: UsernameStr
