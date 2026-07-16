@@ -12,7 +12,7 @@ async def send_email_otp(target_email: str, otp_code: str, subject: str):
     html_content= f"""
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
         <div style="text-align: center; margin-bottom: 20px;">
-            <h2 style="color: #2e7d32; margin: 0;">GreenCycle</h2>
+            <h2 style="color: #2e7d32; margin: 0;">Green Collective Movement</h2>
             <p style="color: #666; margin: 5px 0 0 0;">Verifikasi Keamanan Akun</p>
         </div>
         <hr style="border: none; border-top: 1px solid #eee;" />

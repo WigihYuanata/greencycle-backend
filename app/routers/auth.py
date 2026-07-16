@@ -55,7 +55,7 @@ def create_user(request: Request, user: UserCreate, bg_task: BackgroundTasks, db
         target_phone=new_user.phone_number
         target_username=new_user.username
 
-    bg_task.add_task(send_email_otp, user.email, otp_token, "Kode OTP Pendaftaran DCM")
+    bg_task.add_task(send_email_otp, user.email, otp_token, "Kode OTP Pendaftaran GCM")
     return {"message": "Pendaftaran awal berhasil. Silahkan masukan kode OTP yang dikirim ke EMAIL anda.", "username": target_username}
 
 @router.post("/users/verify-otp/")
