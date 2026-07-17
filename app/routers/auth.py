@@ -113,7 +113,8 @@ def resend_otp(request: Request, data: ResendOTP, bg_task: BackgroundTasks, db: 
     return {"message": f"Kode OTP baru telah dikirim ke EMAIL {user.email}"}
 
 @router.post("/auth/login/", response_model=Token)
-def login(data: UserLogin, db: Session=Depends(get_db)):
+@limiter.limit("10/minute")
+def login(request: Request, data: UserLogin, db: Session=Depends(get_db)):
     user=db.query(User).filter(User.username==data.username).first()
     if not user or not verifikasi_pin(data.pin, user.hashed_pin):
         raise HTTPException(status_code=401, detail="Username atau PIN salah, coba kembali")
