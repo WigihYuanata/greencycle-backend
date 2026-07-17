@@ -1,4 +1,5 @@
 import httpx
+import asyncio
 from app.core.config import settings
 from app.services.notifikasi import notifikasi_admin_telegram
 
@@ -43,15 +44,25 @@ async def send_email_otp(target_email: str, otp_code: str, subject: str):
         "html": html_content
     }
 
-    try:
-        async with httpx.AsyncClient() as client:
-            resp= await client.post(url, headers=headers, json=payload, timeout=10.0)
+    max_retries=3
+    
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient() as client:
+                resp= await client.post(url, headers=headers, json=payload, timeout=10)
 
-            if resp.status_code in [200, 201]:
-                print(f"INFO: Email OTP asinkron berhasil dikirim ke {target_email}")
-            else:
-                print(f"ERROR: API Resend gagal mengirim email ke {target_email} - status: {resp.status_code}, response: {resp.text}")
-                notifikasi_admin_telegram(f"[GCM ALERT] Gagal kirim email OTP ke {target_email}. status: {resp.status_code}")
-    except Exception as e:
-        print(f"ERROR: Terjadi exception saat mengirim email ke {target_email} - {e}")
-        notifikasi_admin_telegram(f"[GCM ALERT] Exception saat mengirim email ke {target_email}: {e}")
+                if resp.status_code in [200, 201]:
+                    print(f"INFO: Email OTP berhasil dikirim ke {target_email}")
+                    return
+                elif resp.status_code==429:
+                    print(f"WARNING: Kena limit resend. antre 1.5 detik (Percobaan {attempt+1}/{max_retries})")
+                    await asyncio.sleep(1.5)
+                    continue
+                else:
+                    print(f"ERROR: Resend gagal. Status {resp.status_code}")
+                    notifikasi_admin_telegram(f"[GCM ALERT] Gagal kirim email OTP ke {target_email}.status: {resp.status_code}")
+                    return
+        except Exception as e:
+            print(f"ERROR: Exception - {e}")
+            notifikasi_admin_telegram(f"[GCM ALERT] Gagal kirim OTP ke {target_email}: {e}")
+            return

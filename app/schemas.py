@@ -1,7 +1,8 @@
-from pydantic import BaseModel, Field, field_validator, AfterValidator
+from pydantic import BaseModel, Field, field_validator, AfterValidator, EmailStr
 from datetime import datetime
 from enum import Enum
 from typing import Optional, Annotated
+
 import re
 
 def validasi_username(v: str) -> str:
@@ -18,7 +19,7 @@ UsernameStr= Annotated[str, AfterValidator(validasi_username)]
 class UserCreate(BaseModel):
     username: UsernameStr
     name: str
-    email: str
+    email: EmailStr
     phone_number: str=Field(min_length=9, max_length=15)
     pin: str=Field(min_length=6, max_length=6)
     @field_validator('pin')
