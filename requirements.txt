@@ -50,3 +50,4 @@ opencv-python-headless
 numpy
 python-multipart
 httpx
+email-validator
