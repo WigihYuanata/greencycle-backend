@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_validator, AfterValidator, EmailStr
+from pydantic import BaseModel, Field, field_validator, AfterValidator, EmailStr, AliasChoices
 from datetime import datetime
 from enum import Enum
 from typing import Optional, Annotated
@@ -37,7 +37,11 @@ class UserCreate(BaseModel):
     
 
 class UserLogin(BaseModel):
-    username: UsernameStr
+    identifier: str =Field(
+        min_length=1,
+        max_length=254,
+        validation_alias=AliasChoices("identifier", "username"),
+    )
     pin: str
     
 class Token(BaseModel):

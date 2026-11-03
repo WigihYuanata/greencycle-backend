@@ -114,14 +114,24 @@ def resend_otp(request: Request, data: ResendOTP, bg_task: BackgroundTasks, db: 
 
 @router.post("/auth/login/", response_model=Token)
 @limiter.limit("10/minute")
-def login(request: Request, data: UserLogin, db: Session=Depends(get_db)):
-    user=db.query(User).filter(User.username==data.username).first()
+def login(request: Request, data: UserLogin, db: Session = Depends(get_db)):
+    identifier = data.identifier.strip()
+    if "@" in identifier:
+        user = db.query(User).filter(User.email == identifier).first()
+    else:
+        user = db.query(User).filter(User.username == identifier.lower()).first()
     if not user or not verifikasi_pin(data.pin, user.hashed_pin):
-        raise HTTPException(status_code=401, detail="Username atau PIN salah, coba kembali")
-    if not getattr(user, 'is_verified', False):
-        raise HTTPException(status_code=403, detail="Akun belum diverifikasi. Silahkan masukan OTP pendaftaran anda")
-    access_token=create_access_token(data={"sub": user.username})
-    return{"access_token": access_token, "token_type": "bearer"}
+        raise HTTPException(
+            status_code=401,
+            detail="Username, email, atau PIN salah.",
+        )
+    if not getattr(user, "is_verified", False):
+        raise HTTPException(
+            status_code=403,
+            detail="Akun belum diverifikasi. Masuk dengan username untuk melanjutkan verifikasi OTP.",
+        )
+    access_token = create_access_token(data={"sub": user.username})
+    return {"access_token": access_token, "token_type": "bearer"}
 
 @router.post("/auth/forgot-pin/")
 @limiter.limit("10/15minutes")
