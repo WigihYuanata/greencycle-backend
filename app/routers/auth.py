@@ -4,7 +4,9 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 import uuid
 import secrets
+import hmac
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.limiter import limiter
 from app.core.security import get_pin, verifikasi_pin, create_access_token
@@ -133,32 +135,63 @@ def login(request: Request, data: UserLogin, db: Session = Depends(get_db)):
     access_token = create_access_token(data={"sub": user.username})
     return {"access_token": access_token, "token_type": "bearer"}
 
+def filter_akun_pemulihan(identifier:str):
+    identifier=identifier.strip()
+    if "@" in identifier:
+        return User.email==identifier
+    return User.username==identifier.lower()
+
+def sidik_otp_reset(user_id: int, kode: str) -> str:
+    pesan=f"reset-pin:{user_id}:{kode}".encode("utf-8")
+    return hmac.digest(
+        settings.SECRET_KEY.encode("utf-8"),
+        pesan, "sha256",
+    ).hex()
+
 @router.post("/auth/forgot-pin/")
 @limiter.limit("10/15minutes")
-def forgot_pin(request: Request, data: ForgotPin, bg_task: BackgroundTasks, db: Session=Depends(get_db)):
-    user=db.query(User).filter(User.username==data.username).first()
-    if not user: raise HTTPException(status_code=404, detail="Username tidak terdaftar")
-    
-    if not user.is_verified:
-        raise HTTPException(status_code= 400, detail="Akun belum diverifikasi.Selesaikan verifikasi OTP pendaftaran terlebih dahulu")
-    reset_token=str(secrets.randbelow(900000)+ 100000)
-    user.reset_token=reset_token
-    user.reset_token_expire= datetime.now(timezone.utc)+timedelta(minutes=15)
+def forgot_pin(
+    request: Request,
+    data: ForgotPin,
+    bg_task: BackgroundTasks,
+    db: Session=Depends(get_db),
+):
+    respons={
+        "message": (
+            "Jika akun memenuhi syarat, kode verifikasi akan dikirim"
+            "ke email pendaftar"
+        )
+    }
+    user=db.query(User).filter(filter_akun_pemulihan(data.identifier), User.is_verified.is_(True)).with_for_update().first()
+    if user is None:
+        return respons
+    kode=str(secrets.randbelow(900000) + 100000)
+    user.reset_token= sidik_otp_reset(user.id, kode)
+    user.reset_token_expire=datetime.now(timezone.utc)+ timedelta(minutes=15)
+    email_tujuan=user.email
     db.commit()
-    bg_task.add_task(send_email_otp, user.email, reset_token, "Kode OTP Reset Pin GCM")
-    return {"message": f"Kode verifikasi reset PIN telah dikirim ke email {user.email}"}
+    bg_task.add_task(send_email_otp, email_tujuan, kode, "Kode OTP Reset PIN GCM")
+    return respons
 
 @router.post("/auth/reset-pin")
 @limiter.limit("20/15minutes")
-def reset(request: Request, data: ResetPinExecute, db: Session=Depends(get_db)):
-    user= db.query(User).filter(User.username==data.username).first()
-    if not user or user.reset_token !=data.kode_verifikasi:
-        raise HTTPException(status_code=400, detail="Token reset tidak valid atau kadaluwarsa")
-    if user.reset_token_expire is None or datetime.now(timezone.utc)>user.reset_token_expire:
-        raise HTTPException(status_code=400, detail="Kode Verifikasi telah kadaluwarsa")
+def reset(
+    request: Request,
+    data: ResetPinExecute,
+    bg_task: BackgroundTasks,
+    db: Session=Depends(get_db),
+):
+    user=db.query(User).filter(filter_akun_pemulihan(data.identifier), User.is_verified.is_(True)).with_for_update().first()
+    if(
+        user is None or not user.reset_token or user.reset_token_expire is None or datetime.now(timezone.utc) >= user.reset_token_expire or not hmac.compare_digest(user.reset_token, sidik_otp_reset(user.id, data.kode_verifikasi),)
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Kode verifikasi tidak valid atau sudah kedaluwarsa",
+        )
     user.hashed_pin=get_pin(data.new_pin)
-    user.reset_token=None
-    user.reset_token_expire=None
+    user.reset_token = None
+    user.reset_token_expire= None
     db.commit()
-    return {"message": "PIN berhasil diperbarui. Silahkan login kembali"}
-   
+    return {"message": "PIN berhasil diperbarui. SIlahkan login kembali"}
+               

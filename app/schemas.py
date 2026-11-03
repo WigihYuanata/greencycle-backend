@@ -49,12 +49,15 @@ class Token(BaseModel):
     token_type: str
 
 class ForgotPin(BaseModel):
-    username: UsernameStr
+    identifier: str =Field(
+        min_length=1,
+        max_length=254,
+        validation_alias=AliasChoices("identifier", "username"),
+    )
 
-class ResetPinExecute(BaseModel):
-    username: UsernameStr
-    kode_verifikasi: str
-    new_pin: str= Field(min_length=6, max_length=6)
+class ResetPinExecute(ForgotPin):
+    kode_verifikasi: str=Field(pattern=r"^[0-9]{6}$")
+    new_pin: str=Field(min_length=6, max_length=6)
     @field_validator('new_pin')
     @classmethod
     def pin_harus_angka(cls, v):
