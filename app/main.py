@@ -35,7 +35,7 @@ app.include_router(voucher.router)
 def startup_migrate():
     Base.metadata.create_all(bind=engine)
     with engine.connect() as conn:
-        #gae pengingat
+        #gae pengingat= 
         #conn.execute(text("ALTER TABLE nama_tabele ADD COLUMN IF NOT EXISTS foto_profil(contoh kolom) VARCHAR ")
         conn.commit()
 

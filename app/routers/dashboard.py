@@ -28,7 +28,12 @@ def get_dashboard_data(db: Session=Depends(get_db), current_user: User=Depends(g
     medium_bottle= bottles.bottle_medium or 0
     large_bottle= bottles.bottle_large or 0
 
-    active_voucher=db.query(reward.voucher_code, VoucherCatalog.cafe_name, VoucherCatalog.name ).join(
+    active_voucher=db.query(
+        reward.voucher_code,
+        VoucherCatalog.cafe_name,
+        VoucherCatalog.name,
+        VoucherCatalog.image_url,
+    ).join(
         VoucherCatalog,
         reward.catalog_id==VoucherCatalog.id
     ).filter(
@@ -36,7 +41,15 @@ def get_dashboard_data(db: Session=Depends(get_db), current_user: User=Depends(g
         reward.status=="Active"
     ).all()
 
-    daftar_voucher=[{"kode":v.voucher_code, "Cafee": v.cafe_name} for v in active_voucher]
+    daftar_voucher = [
+        {
+            "kode": voucher.voucher_code,
+            "Cafee": voucher.cafe_name,
+            "voucher_name": voucher.name,
+            "image_url": voucher.image_url,
+        }
+        for voucher in active_voucher
+    ]
     return {
         "profil":{
         "username": user.username,
